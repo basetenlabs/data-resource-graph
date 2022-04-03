@@ -1,6 +1,6 @@
-import assert from 'assert';
 import DataNode from '../DataNode/DataNode';
 import { NodeStatus } from '../DataNode/NodeTypes';
+import dfs from './dfs';
 
 class Graph implements Iterable<DataNode> {
   private nodes: Map<string, DataNode> = new Map();
@@ -31,18 +31,10 @@ class Graph implements Iterable<DataNode> {
 
     const unevaluated: DataNode[] = [];
 
-    const visited = new Set<DataNode>();
-
-    const stack: DataNode[] = [];
-
-    // Depth-first backwards-traverse graph from observed, detecting cycles and finding unevaluated nodes
-    function visitNode(node: DataNode) {
-      if (visited.has(node)) return;
-
-      // Check for cycle
+    dfs(observed, (node, stack) => {
       const priorNodeIndex = stack.indexOf(node);
       if (priorNodeIndex >= 0) {
-        // Found cycle
+        // Found cycle, set error on all cycle nodes
         const cycle = stack.slice(priorNodeIndex);
         for (const cycleNode of cycle) {
           cycleNode.state = { status: NodeStatus.CicularDependencyError };
@@ -50,26 +42,15 @@ class Graph implements Iterable<DataNode> {
         // Remove cycle nodes from unevaluated
         unevaluated.filter((unevaluatedNode) => !cycle.includes(unevaluatedNode));
 
-        // TODO: what to do with dependents of cycle nodes?
-
         return;
       }
-
-      stack.push(node);
 
       if (node.state.status === NodeStatus.Unevaluated) {
         unevaluated.push(node);
       }
+    });
 
-      node.dependents.forEach(visitNode);
-
-      assert(stack.pop() === node, 'Stack in bad state');
-      visited.add(node);
-    }
-
-    for (const seedNode of observed) {
-      visitNode(seedNode);
-    }
+    // Back-trace through unevaluated
 
     // Built map starting at unevaluated
   }
