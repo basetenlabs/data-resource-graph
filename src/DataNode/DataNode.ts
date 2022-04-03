@@ -1,4 +1,5 @@
-import { NodeState, NodeStatus } from "./NodeTypes";
+import assert from 'assert';
+import { NodeState, NodeStatus } from './NodeTypes';
 
 // TODO: add interfaces for public export
 class DataNode<TResult = unknown> {
@@ -7,13 +8,15 @@ class DataNode<TResult = unknown> {
   constructor(
     public readonly id: string,
     public dependencies: DataNode[],
-    public calculate: (...args: unknown[]) => TResult
+    public calculate: (...args: unknown[]) => TResult,
   ) {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public dependents: DataNode<any>[] = [];
+  public dependents = new Set<DataNode<any>>();
 
-  private observers: Observer<TResult>[] = [];
+  // Use any to avoid problems with assigning DataNode<X> to DataNode<unknown>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private observers: Observer<any>[] = [];
 
   public addObserver(observer: Observer<TResult>): void {
     if (this.observers.includes(observer)) return;
@@ -40,22 +43,25 @@ class DataNode<TResult = unknown> {
     // TODO: trigger recalculation
   }
 
-  public replace(
-    dependencies: DataNode[],
-    calculate: (...args: unknown[]) => TResult
-  ): void {
+  public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
     // Remove self from old dependencies
     for (const dependency of this.dependencies) {
       if (!dependencies.includes(dependency)) {
-        const index = dependency.dependents.indexOf(this);
-        if (index === -1)
-          throw new Error(
-            `Internal error: Graph inconsistency between ${this}.dependencies and ${dependencies}.dependents`
-          );
+        assert(
+          !dependency.dependents.has(this),
+          `Internal error: Graph inconsistency between ${this}.dependencies and ${dependencies}.dependents`,
+        );
+
+        dependency.dependents.add(this);
       }
     }
 
     this.dependencies = dependencies;
+
+    for (const dep of dependencies) {
+      dep.dependents.add(this);
+    }
+
     this.calculate = calculate;
     this.invalidate();
   }
