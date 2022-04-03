@@ -1,20 +1,20 @@
 enum NodeStatus {
   // No dependencies, hasn't been called
-  Unevaluated,
+  Unevaluated = 'uneval',
   // Waiting for dependencies to resolve
-  Pending,
+  Pending = 'pending',
   // Calculating, async only
-  Running,
+  Running = 'running',
   // Value is computed and current
-  Resolved,
+  Resolved = 'resolved',
   // Calculate function threw or resolved error
-  OwnError,
+  OwnError = 'ownError',
   // One of the node's ancestors threw an error
-  DependencyError,
+  DependencyError = 'depError',
   // Node is involved in a circular dependency
-  CicularDependencyError,
+  CicularDependencyError = 'circularDepError',
   // Node has dependency which no longer exists
-  MissingDependencyError,
+  MissingDependencyError = 'missingDepError',
 }
 
 type NodeState<TResult> =
