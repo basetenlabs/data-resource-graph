@@ -1,56 +1,17 @@
 import fromPairs from 'lodash/fromPairs';
-import DataNode from '../DataNode/DataNode';
 import { NodeStatus } from '../DataNode/NodeTypes';
+import TestGraphs from '../Test/testGraphs';
 import Graph from './Graph';
-
-const noop = () => {};
 
 function getNodeStatuses(g: Graph): Record<string, NodeStatus> {
   return fromPairs(Array.from(g).map((node): [string, NodeStatus] => [node.id, node.state.status]));
 }
 
-type GraphBuilder = {
-  addNode(id: string, deps: string[], isObserved?: boolean): GraphBuilder;
-  graph: Graph;
-};
-
-/**
- * Utility for building declarative, as opposed to constructive, graphs
- * @returns
- */
-function graphBuilder(): GraphBuilder {
-  const graph = new Graph();
-
-  function ensureNode(id: string): DataNode<unknown> {
-    return graph.getNode(id) ?? graph.addNode(id, [], noop);
-  }
-
-  const graphBuilder: GraphBuilder = {
-    graph,
-    addNode(id: string, deps: string[], isObserved = true) {
-      const depNodes = deps.map(ensureNode);
-
-      let node = graph.getNode(id);
-      if (node) {
-        node.replace<unknown[]>(depNodes, noop);
-      } else {
-        node = graph.addNode<DataNode[], void>(id, depNodes, noop);
-      }
-
-      if (isObserved) node.addObserver(noop);
-
-      return graphBuilder;
-    },
-  };
-
-  return graphBuilder;
-}
-
 describe('cycle detection', () => {
   it('Detects self-reference', () => {
-    const { graph } = graphBuilder().addNode('a', ['a']).addNode('b', []);
+    const graph = TestGraphs.makeSmallSelfCycle();
 
-    graph.analyze();
+    graph.makeReevaluationGraph();
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.CicularDependencyError,
@@ -59,14 +20,9 @@ describe('cycle detection', () => {
   });
 
   it('Detects no cycle in acyclic graph', () => {
-    const { graph } = graphBuilder()
-      .addNode('a', [])
-      .addNode('b', [])
-      .addNode('c', ['a', 'b'])
-      .addNode('d', ['b'])
-      .addNode('e', ['a', 'd']);
+    const graph = TestGraphs.makeMediumAcylic();
 
-    graph.analyze();
+    graph.makeReevaluationGraph();
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.Unevaluated,
@@ -78,14 +34,9 @@ describe('cycle detection', () => {
   });
 
   it('Detects 3-node cycle', () => {
-    const { graph } = graphBuilder()
-      .addNode('a', ['b', 'd'])
-      .addNode('b', ['c'])
-      .addNode('c', ['a'])
-      .addNode('d', ['e'])
-      .addNode('e', []);
+    const graph = TestGraphs.makeMedium3NodeCycle();
 
-    graph.analyze();
+    graph.makeReevaluationGraph();
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.CicularDependencyError,
@@ -97,14 +48,9 @@ describe('cycle detection', () => {
   });
 
   it('Detects figure-eight cycle', () => {
-    const { graph } = graphBuilder()
-      .addNode('a', ['b', 'd'])
-      .addNode('b', ['c'])
-      .addNode('c', ['a'])
-      .addNode('d', ['e'])
-      .addNode('e', ['a']);
+    const graph = TestGraphs.makeMediumFigureEightCycle();
 
-    graph.analyze();
+    graph.makeReevaluationGraph();
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.CicularDependencyError,

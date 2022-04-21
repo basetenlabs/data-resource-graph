@@ -24,8 +24,8 @@
       "jest"
     ],
     "lib": [
-      "ES6",
-      "DOM"
+      "es2019",
+      "DOM",
     ]
   },
   "include": [
