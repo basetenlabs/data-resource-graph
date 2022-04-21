@@ -1,6 +1,7 @@
 import DataNode from '../DataNode/DataNode';
 import { NodeStatus } from '../DataNode/NodeTypes';
 import dfs from './dfs';
+import { ReevaluationGraphState } from './types';
 
 class Graph implements Iterable<DataNode> {
   private nodes: Map<string, DataNode> = new Map();
@@ -25,34 +26,63 @@ class Graph implements Iterable<DataNode> {
     return newNode;
   }
 
-  public analyze(): void {
-    // Find all observed nodes
+  public makeReevaluationGraph(): ReevaluationGraphState {
+    // Traverse observed subgraph looking for unevaluated deps and cycles
     const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
 
-    const unevaluated: DataNode[] = [];
+    const unevaluated = new Set<DataNode>();
 
-    dfs(observed, (node, stack) => {
-      const priorNodeIndex = stack.indexOf(node);
-      if (priorNodeIndex >= 0) {
-        // Found cycle, set error on all cycle nodes
-        const cycle = stack.slice(priorNodeIndex);
-        for (const cycleNode of cycle) {
-          cycleNode.state = { status: NodeStatus.CicularDependencyError };
+    // Future optimization: whether or not each node is directly or indirectly observed can be cached
+    // based on the set of observed nodes
+    dfs(
+      observed,
+      (node, stack) => {
+        const priorNodeIndex = stack.indexOf(node);
+        if (priorNodeIndex >= 0) {
+          // Found cycle, set error on all cycle nodes
+          const cycle = stack.slice(priorNodeIndex);
+          for (const cycleNode of cycle) {
+            cycleNode.state = { status: NodeStatus.CicularDependencyError };
+            // Remove cycle nodes from unevaluated
+            unevaluated.delete(cycleNode);
+          }
+
+          return;
         }
-        // Remove cycle nodes from unevaluated
-        unevaluated.filter((unevaluatedNode) => !cycle.includes(unevaluatedNode));
 
-        return;
+        if (node.state.status === NodeStatus.Unevaluated) {
+          unevaluated.add(node);
+        }
+      },
+      'backward',
+    );
+
+    // Traverse forwards, recursively making nodes as evaluated
+    dfs(
+      Array.from(unevaluated),
+      (node) => {
+        unevaluated.add(node);
+      },
+      'forward',
+    );
+
+    // Start evaluating with unevaluated, and update dependencies
+
+    const reevaluationGraph: ReevaluationGraphState = { ready: new Set(), waiting: new Map() };
+
+    for (const node of unevaluated) {
+      let numUnevaluatedDeps = 0;
+      for (const dep of node.dependencies) {
+        if (unevaluated.has(dep)) numUnevaluatedDeps++;
       }
-
-      if (node.state.status === NodeStatus.Unevaluated) {
-        unevaluated.push(node);
+      if (numUnevaluatedDeps) {
+        reevaluationGraph.waiting.set(node, numUnevaluatedDeps);
+      } else {
+        reevaluationGraph.ready.add(node);
       }
-    });
+    }
 
-    // Back-trace through unevaluated
-
-    // Built map starting at unevaluated
+    return reevaluationGraph;
   }
 
   getNode(id: string): DataNode | undefined {

@@ -1,6 +1,8 @@
 import assert from 'assert';
 import DataNode from '../DataNode/DataNode';
 
+// TODO: add some basic tests
+
 /**
  * Traverses the graph in depth-first order. Every node reachable from `startingNodes` will
  * be visited exactly once. If a cycle is detected, the node is still visited but the search
@@ -9,13 +11,12 @@ import DataNode from '../DataNode/DataNode';
  * @param startingNodes A starting collection of nodes to iterate from
  * @param visitor function that receives each node as well as the path from one of the starting
  * nodes up to but not including the current node
- * @param backwards If true, traces from a node to its dependents. If false, traces from a node
- * to its dependencies.
+ * @param direction Forward goes node -> dependents (direction of data). Backward goes node -> dependencies
  */
 export default function dfs(
   startingNodes: DataNode[],
   visitor: (node: DataNode, stack: DataNode[]) => void,
-  backwards = false,
+  direction: 'forward' | 'backward' = 'forward',
 ): void {
   const visited = new Set<DataNode>();
 
@@ -34,11 +35,7 @@ export default function dfs(
 
     stack.push(node);
 
-    if (backwards) {
-      node.dependents.forEach(visitHelperer);
-    } else {
-      node.dependencies.forEach(visitHelperer);
-    }
+    (direction === 'forward' ? node.dependents : node.dependencies).forEach(visitHelperer);
 
     assert(stack.pop() === node, 'Stack in bad state');
     visited.add(node);
