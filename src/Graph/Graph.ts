@@ -66,19 +66,20 @@ class Graph implements Iterable<DataNode> {
       'forward',
     );
 
-    // Start evaluating with unevaluated, and update dependencies
-
     const reevaluationGraph: ReevaluationGraphState = { ready: new Set(), waiting: new Map() };
 
-    for (const node of unevaluated) {
-      let numUnevaluatedDeps = 0;
-      for (const dep of node.dependencies) {
-        if (unevaluated.has(dep)) numUnevaluatedDeps++;
-      }
-      if (numUnevaluatedDeps) {
-        reevaluationGraph.waiting.set(node, numUnevaluatedDeps);
-      } else {
-        reevaluationGraph.ready.add(node);
+    // For all observed and unevaluated nodes, decide whether it's ready or is waiting on dependencies
+    for (const node of observed) {
+      if (unevaluated.has(node)) {
+        let numUnevaluatedDeps = 0;
+        for (const dep of node.dependencies) {
+          if (unevaluated.has(dep)) numUnevaluatedDeps++;
+        }
+        if (numUnevaluatedDeps) {
+          reevaluationGraph.waiting.set(node, numUnevaluatedDeps);
+        } else {
+          reevaluationGraph.ready.add(node);
+        }
       }
     }
 

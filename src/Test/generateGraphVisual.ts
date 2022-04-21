@@ -4,11 +4,12 @@ import TestGraphs from './testGraphs';
 
 function generateMermaidVisual(graph: Graph): string {
   return (
-    `flowchart LR\n` +
+    `flowchart LR\n  ` +
     Array.from(graph)
-      .flatMap((nodeA) =>
-        Array.from(nodeA.dependents).map((nodeB) => `  ${nodeA.id} --> ${nodeB.id}`),
-      )
+      .flatMap((nodeA) => [
+        `  ${nodeA.id}${nodeA.hasObserver() ? `[${nodeA.id}]` : `(${nodeA.id})`}`,
+        ...Array.from(nodeA.dependents).map((nodeB) => `  ${nodeA.id} --> ${nodeB.id}`),
+      ])
       .join('\n')
   );
 }
@@ -28,6 +29,14 @@ if (require.main === module) {
 
 Auto-generated from \`src/Test/testGraphs.ts\` by \`src/Test/generateGraphVisual.ts\`
 Required Mermaid support in Markdown to render. For VS Code, use the 'shd101wyy.markdown-preview-enhanced' extension
+
+## Key
+
+\`\`\`mermaid
+flowchart LR
+  a[hasObserver]
+  b[unobserved]
+\`\`\`
 
 ${graphVisuals}
   `,

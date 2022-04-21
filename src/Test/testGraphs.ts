@@ -35,7 +35,7 @@ const testGraphs = {
       .addNode('b', ['a', 'c'])
       .addNode('d', ['c', 'g'])
       .addNode('e', ['b', 'd'])
-      .addNode('f', ['b']).graph,
+      .addNode('f', ['b'], false).graph,
 } as const;
 
 export default testGraphs;
