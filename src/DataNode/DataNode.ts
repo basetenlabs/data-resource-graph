@@ -43,6 +43,10 @@ class DataNode<TResult = unknown> {
     // TODO: trigger recalculation
   }
 
+  public replace<TArgs extends unknown[]>(
+    dependencies: { [Key in keyof TArgs]: DataNode<TArgs[Key]> },
+    calculate: (...args: TArgs) => TResult,
+  ): void;
   public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
     // Remove self from old dependencies
     for (const dependency of this.dependencies) {

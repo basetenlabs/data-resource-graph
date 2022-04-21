@@ -32,7 +32,7 @@ function graphBuilder(): GraphBuilder {
 
       let node = graph.getNode(id);
       if (node) {
-        node.replace(depNodes, noop);
+        node.replace<unknown[]>(depNodes, noop);
       } else {
         node = graph.addNode<DataNode[], void>(id, depNodes, noop);
       }
