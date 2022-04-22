@@ -1,14 +1,25 @@
 import assert from 'assert';
-import { NodeState, NodeStatus } from './NodeTypes';
+import isEqualWith from 'lodash/isEqualWith';
+import { shallowEquals } from '../utils';
+import { NodeState, NodeStatus, Observer } from './NodeTypes';
+import { areStatesEqual, isErrorStatus } from './utils';
 
 // TODO: add interfaces for public export
+
+interface EvaluationData<TResult> {
+  dependencies: DataNode[];
+  dependencyStates: NodeState<unknown>[];
+  state: NodeState<TResult>;
+}
+
 class DataNode<TResult = unknown> {
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
+  private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
 
   constructor(
     public readonly id: string,
     public dependencies: DataNode[],
-    public calculate: (...args: unknown[]) => TResult,
+    public calculateFunction: (...args: unknown[]) => TResult,
   ) {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,7 +50,6 @@ class DataNode<TResult = unknown> {
    */
   public invalidate(): void {
     this.state = { status: NodeStatus.Unevaluated };
-    // TODO: invalidate dependents?
     // TODO: trigger recalculation
   }
 
@@ -66,13 +76,71 @@ class DataNode<TResult = unknown> {
       dep.dependents.add(this);
     }
 
-    this.calculate = calculate;
+    this.calculateFunction = calculate;
     this.invalidate();
   }
 
-  [Symbol.toStringTag]: () => `DataNode(this.id)`;
-}
+  public evaluate(): void {
+    const depStates = this.dependencies.map((dep) => dep.state);
+    try {
+      if (this.lastEvaluation && this.state.status !== NodeStatus.Unevaluated) {
+        if (
+          shallowEquals(this.dependencies, this.lastEvaluation.dependencies) &&
+          isEqualWith(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
+        ) {
+          // Short circuit re-evaluation since dependencies are the same
+          return;
+        }
+      }
 
-type Observer<TResult> = (result: TResult) => void;
+      // Build dependency values
+      const dependencyValues: unknown[] = [];
+      for (const depState of depStates) {
+        // Is dependency in an errored state?
+        if (isErrorStatus(depState.status)) {
+          this.state = {
+            status: NodeStatus.DependencyError,
+          };
+          return;
+        }
+        if (depState.status !== NodeStatus.Resolved) {
+          console.error('DataNode.evalate() called with dependency in unresolved state');
+          this.state = {
+            status: NodeStatus.InternalError,
+          };
+          return;
+        }
+        dependencyValues.push(depState.value);
+      }
+
+      let value: TResult;
+      try {
+        // Calculate node
+        value = this.calculateFunction(...dependencyValues);
+      } catch (err) {
+        this.state = {
+          status: NodeStatus.OwnError,
+        };
+        return;
+      }
+
+      // TODO: short circuit on different equality check (e.g. structural equality) provided
+
+      this.state = {
+        status: NodeStatus.Resolved,
+        value: value,
+      };
+    } finally {
+      // Ensure lastEvaluation is set on return
+      this.lastEvaluation = {
+        dependencyStates: depStates,
+        dependencies: this.dependencies,
+        state: this.state,
+      };
+    }
+  }
+
+  [Symbol.toStringTag] = (): string => `DataNode(${this.id})`;
+}
 
 export default DataNode;

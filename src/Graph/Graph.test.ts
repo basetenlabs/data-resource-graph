@@ -85,7 +85,7 @@ describe('makeReevaluationGraph', () => {
     // Only b and c start unevaluated
     for (const resolvedNodeId of ['a', 'b', 'e', 'f', 'g']) {
       // TODO: figure out less hacky way
-      graph.getNode(resolvedNodeId).state = { status: NodeStatus.Resolved };
+      graph.getNode(resolvedNodeId).state = { status: NodeStatus.Resolved, value: null };
     }
     const reevalGraph = graph.makeReevaluationGraph();
     const expectedReevalGraph: ReevaluationGraphStateById = {
@@ -98,4 +98,48 @@ describe('makeReevaluationGraph', () => {
     };
     expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
   });
+
+  it('correctly computes for 3x3 Net', () => {
+    const graph = TestGraphs.make3By3Net();
+    // a and f start unevaluated
+    for (const resolvedNodeId of ['b', 'c', 'd', 'e', 'g', 'h', 'i']) {
+      // TODO: figure out less hacky way
+      graph.getNode(resolvedNodeId).state = { status: NodeStatus.Resolved, value: null };
+    }
+    const reevalGraph = graph.makeReevaluationGraph();
+    const expectedReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['a', 'f']),
+      waiting: new Map<string, number>([
+        ['d', 1],
+        ['e', 1],
+        ['g', 2],
+        ['h', 3],
+        ['i', 2],
+      ]),
+    };
+    expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
+  });
+
+  it('correctly computes for 3x3 Net 2', () => {
+    const graph = TestGraphs.make3By3Net();
+    // c and g start unevaluated
+    for (const resolvedNodeId of ['a', 'b', 'd', 'e', 'f', 'h', 'i']) {
+      // TODO: figure out less hacky way
+      graph.getNode(resolvedNodeId).state = { status: NodeStatus.Resolved, value: null };
+    }
+    const reevalGraph = graph.makeReevaluationGraph();
+    const expectedReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['c']),
+      waiting: new Map<string, number>([
+        ['e', 1],
+        ['f', 1],
+        ['g', 1],
+        ['h', 2],
+        ['i', 2],
+      ]),
+    };
+    expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
+  });
+
+  describe('evaluation', () => {});
 });

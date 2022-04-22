@@ -1,7 +1,7 @@
 enum NodeStatus {
   // No dependencies, hasn't been called
   Unevaluated = 'uneval',
-  // Waiting for dependencies to resolve
+  // Waiting for dependencies to resolve (only observable in async)
   Pending = 'pending',
   // Calculating, async only
   Running = 'running',
@@ -15,6 +15,8 @@ enum NodeStatus {
   CicularDependencyError = 'circularDepError',
   // Node has dependency which no longer exists
   MissingDependencyError = 'missingDepError',
+  // Graph was in unexpected state
+  InternalError = 'internalError',
 }
 
 type NodeState<TResult> =
@@ -23,18 +25,20 @@ type NodeState<TResult> =
         | NodeStatus.Unevaluated
         | NodeStatus.Pending
         // | NodeStatus.Running comment out for now
-        | NodeStatus.Resolved
         | NodeStatus.OwnError
         // TODO: include error info like dependency path and error
         | NodeStatus.DependencyError
         // TODO: include cycle
         | NodeStatus.CicularDependencyError
         // TODO: include dependency path
-        | NodeStatus.MissingDependencyError;
+        | NodeStatus.MissingDependencyError
+        | NodeStatus.InternalError;
     }
   | {
       status: NodeStatus.Resolved;
       value: TResult;
     };
 
-export { NodeStatus, NodeState };
+type Observer<TResult> = (result: TResult) => void;
+
+export { NodeStatus, NodeState, Observer };

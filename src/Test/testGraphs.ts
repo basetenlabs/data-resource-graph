@@ -36,6 +36,18 @@ const testGraphs = {
       .addNode('d', ['c', 'g'])
       .addNode('e', ['b', 'd'])
       .addNode('f', ['b'], false).graph,
+
+  make3By3Net: () =>
+    graphBuilder()
+      .addNode('a', [])
+      .addNode('b', [])
+      .addNode('c', [])
+      .addNode('d', ['a', 'b'])
+      .addNode('e', ['a', 'b', 'c'])
+      .addNode('f', ['b', 'c'])
+      .addNode('g', ['d', 'e'])
+      .addNode('h', ['d', 'e', 'f'])
+      .addNode('i', ['e', 'f']).graph,
 } as const;
 
 export default testGraphs;

@@ -4,7 +4,7 @@ import TestGraphs from './testGraphs';
 
 function generateMermaidVisual(graph: Graph): string {
   return (
-    `flowchart LR\n  ` +
+    `flowchart LR\n` +
     Array.from(graph)
       .flatMap((nodeA) => [
         `  ${nodeA.id}${nodeA.hasObserver() ? `[${nodeA.id}]` : `(${nodeA.id})`}`,
@@ -35,7 +35,7 @@ Required Mermaid support in Markdown to render. For VS Code, use the 'shd101wyy.
 \`\`\`mermaid
 flowchart LR
   a[hasObserver]
-  b[unobserved]
+  b(unobserved)
 \`\`\`
 
 ${graphVisuals}

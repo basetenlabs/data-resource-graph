@@ -1,5 +1,7 @@
+import assert from 'assert';
 import DataNode from '../DataNode/DataNode';
 import { NodeStatus } from '../DataNode/NodeTypes';
+import { takeFromSet } from '../utils';
 import dfs from './dfs';
 import { ReevaluationGraphState } from './types';
 
@@ -26,6 +28,13 @@ class Graph implements Iterable<DataNode> {
     return newNode;
   }
 
+  public deleteNode(_id: string): void {
+    // TODO: Mark all dependents as DependencyError
+  }
+
+  /**
+   * @internal
+   */
   public makeReevaluationGraph(): ReevaluationGraphState {
     // Traverse observed subgraph looking for unevaluated deps and cycles
     const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
@@ -84,6 +93,32 @@ class Graph implements Iterable<DataNode> {
     }
 
     return reevaluationGraph;
+  }
+
+  public evaluate(): void {
+    const { ready, waiting } = this.makeReevaluationGraph();
+
+    let readyNode: DataNode | undefined;
+
+    // eslint-disable-next-line no-cond-assign
+    while ((readyNode = takeFromSet(ready))) {
+      readyNode.evaluate();
+
+      for (const dependent of readyNode.dependents) {
+        const dependentCounter = waiting.get(dependent);
+        if (dependentCounter !== undefined) {
+          if (dependentCounter === 1) {
+            waiting.delete(dependent);
+            ready.add(dependent);
+          } else if (dependentCounter > 1) {
+            // Signal
+            waiting.set(dependent, dependentCounter - 1);
+          }
+        }
+      }
+    }
+
+    assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
   }
 
   getNode(id: string): DataNode | undefined {
