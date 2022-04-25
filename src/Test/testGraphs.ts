@@ -35,19 +35,24 @@ const testGraphs = {
       .addNode('b', ['a', 'c'])
       .addNode('d', ['c', 'g'])
       .addNode('e', ['b', 'd'])
-      .addNode('f', ['b'], false).graph,
+      .addNode('f', ['b'], { isObserved: false }).graph,
 
-  make3By3Net: () =>
+  // 3x3 neural net
+  make3By3NuralNet: () =>
     graphBuilder()
-      .addNode('a', [])
-      .addNode('b', [])
-      .addNode('c', [])
-      .addNode('d', ['a', 'b'])
-      .addNode('e', ['a', 'b', 'c'])
-      .addNode('f', ['b', 'c'])
-      .addNode('g', ['d', 'e'])
-      .addNode('h', ['d', 'e', 'f'])
-      .addNode('i', ['e', 'f']).graph,
+      .addNode('a', [], { fn: () => -0.3 })
+      .addNode('b', [], { fn: () => -0.2 })
+      .addNode('c', [], { fn: () => 0.1 })
+      .addNode('d', ['a', 'b'], { fn: (a: number, b: number) => -0.8 * a + -0.1 * b })
+      .addNode('e', ['a', 'b', 'c'], {
+        fn: (a: number, b: number, c: number) => -0.8 * a + 0.5 * b + 0.2 * c,
+      })
+      .addNode('f', ['b', 'c'], { fn: (b: number, c: number) => 0.3 * b + 0.1 * c })
+      .addNode('g', ['d', 'e'], { fn: (d: number, e: number) => 0.1 * d + 0.9 * e })
+      .addNode('h', ['d', 'e', 'f'], {
+        fn: (d: number, e: number, f: number) => 0.3 * d + 0.2 * e + 0.1 * f,
+      })
+      .addNode('i', ['e', 'f'], { fn: (e: number, f: number) => 0 * e + 0.7 * f }).graph,
 } as const;
 
 export default testGraphs;

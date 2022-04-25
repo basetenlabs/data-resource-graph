@@ -21,7 +21,7 @@
     "outDir": "./dist/tsc/",
     "types": [
       "node",
-      "jest"
+      "jest",
     ],
     "lib": [
       "es2019",
@@ -32,7 +32,6 @@
     "src/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "**/*.test.ts"
+    "node_modules"
   ]
 }
