@@ -13,6 +13,10 @@ export function areStatesEqual<TResult>(
   );
 }
 
+export function areArraysEqual<T>(arrA: T[], arrB: T[], comparator: (a: T, b: T) => boolean) {
+  return arrA.length === arrB.length && arrA.every((a, idx) => comparator(a, arrB[idx]));
+}
+
 export function isErrorStatus(status: NodeStatus): boolean {
   switch (status) {
     case NodeStatus.Unevaluated:

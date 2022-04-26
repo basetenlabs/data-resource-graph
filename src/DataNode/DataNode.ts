@@ -1,8 +1,7 @@
 import assert from 'assert';
-import isEqualWith from 'lodash/isEqualWith';
 import { shallowEquals } from '../utils';
 import { NodeState, NodeStatus, Observer } from './NodeTypes';
-import { areStatesEqual, isErrorStatus } from './utils';
+import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
 
 // TODO: add interfaces for public export
 
@@ -19,7 +18,7 @@ class DataNode<TResult = unknown> {
   constructor(
     public readonly id: string,
     public dependencies: DataNode[],
-    public calculateFunction: (...args: unknown[]) => TResult,
+    private calculateFunction: (...args: unknown[]) => TResult,
   ) {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,7 +85,7 @@ class DataNode<TResult = unknown> {
       if (this.lastEvaluation && this.state.status !== NodeStatus.Unevaluated) {
         if (
           shallowEquals(this.dependencies, this.lastEvaluation.dependencies) &&
-          isEqualWith(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
+          areArraysEqual(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
         ) {
           // Short circuit re-evaluation since dependencies are the same
           return;

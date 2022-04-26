@@ -1,3 +1,4 @@
+import { mapValues } from 'lodash';
 import fromPairs from 'lodash/fromPairs';
 import { NodeState, NodeStatus } from '../DataNode/NodeTypes';
 import TestGraphs from '../Test/testGraphs';
@@ -133,7 +134,16 @@ describe('makeReevaluationGraph', () => {
   });
 
   describe('evaluation', () => {
-    it('evaluates 3x3 neural net', () => {
+    function spyOnCalculates(g: Graph): Record<string, jest.SpyInstance> {
+      const spies: Record<string, jest.SpyInstance> = {};
+      for (const node of g) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        spies[node.id] = jest.spyOn(node as any, 'calculateFunction');
+      }
+      return spies;
+    }
+
+    it('calculates correct reevaluation graph', () => {
       const graph = TestGraphs.make3By3NuralNet();
 
       graph.evaluate();
@@ -167,7 +177,74 @@ describe('makeReevaluationGraph', () => {
           ['i', 2],
         ]),
       };
+
       expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
+    });
+
+    it("first layer node's replacement causes downstream re-render", () => {
+      const graph = TestGraphs.make3By3NuralNet();
+      graph.evaluate();
+
+      // Replace value of c
+      graph.getNode('c')?.replace([], () => 0.3);
+
+      const spies = spyOnCalculates(graph);
+
+      // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
+      graph.evaluate();
+
+      expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
+        a: 0,
+        b: 0,
+        c: 1,
+        d: 0,
+        e: 1,
+        f: 1,
+        g: 1,
+        h: 1,
+        i: 1,
+      });
+
+      const expectedNodeStates: Record<string, NodeState<number>> = {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+        c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
+        d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
+        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
+        f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.03) },
+        g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.206) },
+        h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.115) },
+        i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.021) },
+      };
+
+      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+    });
+
+    it("when invalidated node returns same result, dependents aren't reevaluated ", () => {
+      const graph = TestGraphs.make3By3NuralNet();
+
+      graph.evaluate();
+
+      // Only b and c start unevaluated
+      graph.getNode('c')?.invalidate();
+
+      // Re-evaluate
+      const spies = spyOnCalculates(graph);
+
+      // 'c' gets reevaluated but returns same result, so dependents aren't reevaluated
+      graph.evaluate();
+
+      expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
+        a: 0,
+        b: 0,
+        c: 1,
+        d: 0,
+        e: 0,
+        f: 0,
+        g: 0,
+        h: 0,
+        i: 0,
+      });
     });
   });
 });
