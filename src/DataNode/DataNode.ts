@@ -11,6 +11,8 @@ interface EvaluationData<TResult> {
   state: NodeState<TResult>;
 }
 
+export type DataNodesOf<TArgs extends unknown[]> = { [Key in keyof TArgs]: DataNode<TArgs[Key]> };
+
 class DataNode<TResult = unknown> {
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
   private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
@@ -53,7 +55,7 @@ class DataNode<TResult = unknown> {
   }
 
   public replace<TArgs extends unknown[]>(
-    dependencies: { [Key in keyof TArgs]: DataNode<TArgs[Key]> },
+    dependencies: DataNodesOf<TArgs>,
     calculate: (...args: TArgs) => TResult,
   ): void;
   public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
@@ -61,7 +63,7 @@ class DataNode<TResult = unknown> {
     for (const dependency of this.dependencies) {
       if (!dependencies.includes(dependency)) {
         assert(
-          !dependency.dependents.has(this),
+          dependency.dependents.has(this),
           `Internal error: Graph inconsistency between ${this}.dependencies and ${dependencies}.dependents`,
         );
 

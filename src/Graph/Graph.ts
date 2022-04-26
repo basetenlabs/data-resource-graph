@@ -1,5 +1,5 @@
 import assert from 'assert';
-import DataNode from '../DataNode/DataNode';
+import DataNode, { DataNodesOf } from '../DataNode/DataNode';
 import { NodeStatus } from '../DataNode/NodeTypes';
 import { takeFromSet } from '../utils';
 import dfs from './dfs';
@@ -8,10 +8,10 @@ import { ReevaluationGraphState } from './types';
 class Graph implements Iterable<DataNode> {
   private nodes: Map<string, DataNode> = new Map();
 
-  public addNode<TDependencies extends DataNode[], TResult>(
+  public addNode<TArgs extends unknown[], TResult>(
     id: string,
-    dependencies: TDependencies,
-    calculate: (...deps: TDependencies) => TResult,
+    dependencies: DataNodesOf<TArgs>,
+    calculate: (...args: TArgs) => TResult,
   ): DataNode<TResult> {
     if (this.nodes.has(id)) {
       throw new Error(`Node with id ${id} already exists`);

@@ -2,12 +2,12 @@ import { defaults } from 'lodash';
 import DataNode from '../DataNode/DataNode';
 import Graph from '../Graph/Graph';
 
-export type GraphBuilder = {
-  addNode(id: string, deps: string[], options?: Partial<NodeOptions>): GraphBuilder;
+export type GraphBuilder<TValue> = {
+  addNode(id: string, deps: string[], options?: Partial<NodeOptions<TValue>>): GraphBuilder<TValue>;
   graph: Graph;
 };
 
-export type NodeOptions = {
+export type NodeOptions<TValue> = {
   /**
    * @default true
    */
@@ -16,12 +16,12 @@ export type NodeOptions = {
    * Calculate fn
    * @default noop
    */
-  fn(...args: unknown[]): unknown;
+  fn(...args: TValue[]): TValue;
 };
 
 const noop = () => {};
 
-const defaultOptions: NodeOptions = {
+const defaultOptions: NodeOptions<unknown> = {
   isObserved: true,
   fn: noop,
 };
@@ -29,25 +29,28 @@ const defaultOptions: NodeOptions = {
 /**
  * Utility for building declarative, as opposed to constructive, graphs
  */
-export function graphBuilder(): GraphBuilder {
+export function graphBuilder<TValue = unknown>(): GraphBuilder<TValue> {
   const graph = new Graph();
 
-  function ensureNode(id: string): DataNode<unknown> {
-    return graph.getNode(id) ?? graph.addNode(id, [], noop);
+  function ensureNode(id: string): DataNode<TValue> {
+    return (
+      (graph.getNode(id) as DataNode<TValue>) ??
+      graph.addNode<[], TValue>(id, [], noop as () => TValue)
+    );
   }
 
-  const graphBuilder: GraphBuilder = {
+  const graphBuilder: GraphBuilder<TValue> = {
     graph,
     addNode(id: string, deps: string[], partialOptions = {}) {
-      const options: NodeOptions = defaults(partialOptions, defaultOptions);
+      const options: NodeOptions<TValue> = defaults(partialOptions, defaultOptions);
 
       const depNodes = deps.map(ensureNode);
 
       let node = graph.getNode(id);
       if (node) {
-        node.replace<unknown[]>(depNodes, options.fn);
+        node.replace<TValue[]>(depNodes as DataNode<TValue>[], options.fn);
       } else {
-        node = graph.addNode<DataNode[], void>(id, depNodes, options.fn);
+        node = graph.addNode<TValue[], TValue>(id, depNodes, options.fn);
       }
 
       if (options.isObserved) node.addObserver(noop);

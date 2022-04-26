@@ -128,6 +128,29 @@ describe('makeReevaluationGraph', () => {
     expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
   });
 
+  it('correctly computes for 3x3 neural net, first and second layer invalidated', () => {
+    const graph = TestGraphs.make3By3NuralNet();
+    graph.evaluate();
+
+    // Only b and c start unevaluated
+    graph.getNode('c')?.invalidate();
+    graph.getNode('g')?.invalidate();
+
+    const reevalGraph = graph.makeReevaluationGraph();
+    const expectedReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['c']),
+      waiting: new Map<string, number>([
+        ['e', 1],
+        ['f', 1],
+        ['g', 1],
+        ['h', 2],
+        ['i', 2],
+      ]),
+    };
+
+    expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
+  });
+
   it('correctly computes for 3x3 neural net 2', () => {
     const graph = TestGraphs.make3By3NuralNet();
     graph.evaluate();
@@ -143,7 +166,7 @@ describe('makeReevaluationGraph', () => {
       return spies;
     }
 
-    it('calculates correct reevaluation graph', () => {
+    it('does first evaluation', () => {
       const graph = TestGraphs.make3By3NuralNet();
 
       graph.evaluate();
@@ -161,24 +184,6 @@ describe('makeReevaluationGraph', () => {
       };
 
       expect(getNodeStates(graph)).toEqual(expectedNodeStates);
-
-      // Only b and c start unevaluated
-      graph.getNode('c')?.invalidate();
-      graph.getNode('g')?.invalidate();
-
-      const reevalGraph = graph.makeReevaluationGraph();
-      const expectedReevalGraph: ReevaluationGraphStateById = {
-        ready: new Set(['c']),
-        waiting: new Map<string, number>([
-          ['e', 1],
-          ['f', 1],
-          ['g', 1],
-          ['h', 2],
-          ['i', 2],
-        ]),
-      };
-
-      expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
     });
 
     it("first layer node's replacement causes downstream re-render", () => {
@@ -245,6 +250,75 @@ describe('makeReevaluationGraph', () => {
         h: 0,
         i: 0,
       });
+    });
+
+    it('propagates evaluation errors', () => {
+      const graph = TestGraphs.make3By3NuralNet();
+      graph.evaluate();
+
+      // Replace value of c
+      graph.getNode('c')?.replace([], () => {
+        throw new Error();
+      });
+
+      // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
+      graph.evaluate();
+
+      const expectedNodeStates: Record<string, NodeState<number>> = {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+        c: { status: NodeStatus.OwnError },
+        d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
+        e: { status: NodeStatus.DependencyError },
+        f: { status: NodeStatus.DependencyError },
+        g: { status: NodeStatus.DependencyError },
+        h: { status: NodeStatus.DependencyError },
+        i: { status: NodeStatus.DependencyError },
+      };
+
+      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+    });
+
+    it('Evaluates non-cycle node in graph with cycle', () => {
+      const graph = TestGraphs.makeSmallSelfCycle();
+      graph.evaluate();
+
+      const expectedNodeStates: Record<string, NodeState<number>> = {
+        a: { status: NodeStatus.CicularDependencyError },
+        b: { status: NodeStatus.Resolved, value: 1 },
+      };
+
+      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+    });
+
+    it('Evaluates successfully after breaking a self-cycle', () => {
+      const graph = TestGraphs.makeSmallSelfCycle();
+      graph.evaluate();
+
+      graph.getNode('a')?.replace([], () => 2);
+      graph.evaluate();
+
+      const expectedNodeStates: Record<string, NodeState<number>> = {
+        a: { status: NodeStatus.Resolved, value: 2 },
+        b: { status: NodeStatus.Resolved, value: 1 },
+      };
+
+      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+    });
+
+    it('Evaluates after breaking a 3-node cycle', () => {
+      const graph = TestGraphs.makeMedium3NodeCycle();
+      graph.evaluate();
+
+      graph.getNode('a')?.replace([], () => 2);
+      graph.evaluate();
+
+      const expectedNodeStates: Record<string, NodeState<number>> = {
+        a: { status: NodeStatus.Resolved, value: 2 },
+        b: { status: NodeStatus.Resolved, value: 1 },
+      };
+
+      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
     });
   });
 });

@@ -13,7 +13,11 @@ export function areStatesEqual<TResult>(
   );
 }
 
-export function areArraysEqual<T>(arrA: T[], arrB: T[], comparator: (a: T, b: T) => boolean) {
+export function areArraysEqual<T>(
+  arrA: T[],
+  arrB: T[],
+  comparator: (a: T, b: T) => boolean,
+): boolean {
   return arrA.length === arrB.length && arrA.every((a, idx) => comparator(a, arrB[idx]));
 }
 
