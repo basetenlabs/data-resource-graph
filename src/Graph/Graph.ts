@@ -36,13 +36,13 @@ class Graph implements Iterable<DataNode> {
    * @internal
    */
   public makeReevaluationGraph(): ReevaluationGraphState {
-    // Traverse observed subgraph looking for unevaluated deps and cycles
     const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
 
     const unevaluated = new Set<DataNode>();
 
     // Future optimization: whether or not each node is directly or indirectly observed can be cached
-    // based on the set of observed nodes
+    // based on the set of observed nodes and graph topology
+    // Traverse observed subgraph looking for unevaluated deps and cycles
     dfs(
       observed,
       (node, stack) => {
@@ -70,7 +70,9 @@ class Graph implements Iterable<DataNode> {
     dfs(
       Array.from(unevaluated),
       (node) => {
-        unevaluated.add(node);
+        if (node.state.status !== NodeStatus.CicularDependencyError) {
+          unevaluated.add(node);
+        }
       },
       'forward',
     );

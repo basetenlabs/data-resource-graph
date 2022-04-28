@@ -1,4 +1,5 @@
 import assert from 'assert';
+import dfs from '../Graph/dfs';
 import { shallowEquals } from '../utils';
 import { NodeState, NodeStatus, Observer } from './NodeTypes';
 import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
@@ -59,6 +60,19 @@ class DataNode<TResult = unknown> {
     calculate: (...args: TArgs) => TResult,
   ): void;
   public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
+    // If graph was part of a cycle, remove circular dependency error from
+    // all dependencies that are part of a cycle since they may have been part of the same cycle.
+    // When the graph is re-evaluated, any nodes that are still part of a cycle will be
+    // marked as such.
+    dfs([this], (node): boolean => {
+      if (node.state.status !== NodeStatus.CicularDependencyError) {
+        return false;
+      }
+
+      node.invalidate();
+      return true;
+    });
+
     // Remove self from old dependencies
     for (const dependency of this.dependencies) {
       if (!dependencies.includes(dependency)) {

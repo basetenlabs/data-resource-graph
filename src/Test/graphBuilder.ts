@@ -3,33 +3,36 @@ import DataNode from '../DataNode/DataNode';
 import Graph from '../Graph/Graph';
 
 export type GraphBuilder<TValue> = {
-  addNode(id: string, deps: string[], options?: Partial<NodeOptions<TValue>>): GraphBuilder<TValue>;
+  addNode(
+    id: string,
+    deps: string[],
+    calculateFn?: (...args: TValue[]) => TValue,
+    partialOptions?: Partial<NodeOptions>,
+  ): GraphBuilder<TValue>;
   graph: Graph;
 };
 
-export type NodeOptions<TValue> = {
+export type NodeOptions = {
   /**
    * @default true
    */
   isObserved: boolean;
-  /**
-   * Calculate fn
-   * @default noop
-   */
-  fn(...args: TValue[]): TValue;
 };
 
 const noop = () => {};
 
-const defaultOptions: NodeOptions<unknown> = {
+const defaultOptions: NodeOptions = {
   isObserved: true,
-  fn: noop,
 };
 
 /**
  * Utility for building declarative, as opposed to constructive, graphs
  */
-export function graphBuilder<TValue = unknown>(): GraphBuilder<TValue> {
+export function graphBuilder<TValue extends undefined>(
+  defaultNodeValue?: undefined,
+): GraphBuilder<TValue>;
+export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphBuilder<TValue>;
+export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphBuilder<TValue> {
   const graph = new Graph();
 
   function ensureNode(id: string): DataNode<TValue> {
@@ -41,16 +44,16 @@ export function graphBuilder<TValue = unknown>(): GraphBuilder<TValue> {
 
   const graphBuilder: GraphBuilder<TValue> = {
     graph,
-    addNode(id: string, deps: string[], partialOptions = {}) {
-      const options: NodeOptions<TValue> = defaults(partialOptions, defaultOptions);
+    addNode(id, deps, calculateFn = () => defaultNodeValue, partialOptions = {}) {
+      const options: NodeOptions = defaults(partialOptions, defaultOptions);
 
       const depNodes = deps.map(ensureNode);
 
       let node = graph.getNode(id);
       if (node) {
-        node.replace<TValue[]>(depNodes as DataNode<TValue>[], options.fn);
+        node.replace<TValue[]>(depNodes as DataNode<TValue>[], calculateFn);
       } else {
-        node = graph.addNode<TValue[], TValue>(id, depNodes, options.fn);
+        node = graph.addNode<TValue[], TValue>(id, depNodes, calculateFn);
       }
 
       if (options.isObserved) node.addObserver(noop);

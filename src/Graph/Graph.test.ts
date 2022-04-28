@@ -1,5 +1,5 @@
-import { mapValues } from 'lodash';
 import fromPairs from 'lodash/fromPairs';
+import mapValues from 'lodash/mapValues';
 import { NodeState, NodeStatus } from '../DataNode/NodeTypes';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
@@ -151,174 +151,240 @@ describe('makeReevaluationGraph', () => {
     expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
   });
 
-  it('correctly computes for 3x3 neural net 2', () => {
-    const graph = TestGraphs.make3By3NuralNet();
-    graph.evaluate();
+  it('Correctly computes for small graph with cycle', () => {
+    const graph = TestGraphs.makeSmallSelfCycle();
+
+    const reevalGraph = graph.makeReevaluationGraph();
+
+    const expectedReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['b']),
+      waiting: new Map<string, number>(),
+    };
+
+    expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
   });
 
-  describe('evaluation', () => {
-    function spyOnCalculates(g: Graph): Record<string, jest.SpyInstance> {
-      const spies: Record<string, jest.SpyInstance> = {};
-      for (const node of g) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        spies[node.id] = jest.spyOn(node as any, 'calculateFunction');
-      }
-      return spies;
+  it('Correctly computes for small graph with cycle after breaking cycle', () => {
+    const graph = TestGraphs.makeSmallSelfCycle();
+    graph.evaluate();
+
+    graph.getNode('a')?.replace([], () => 2);
+    const reevalGraph = graph.makeReevaluationGraph();
+
+    const expectedReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['a']),
+      waiting: new Map<string, number>(),
+    };
+
+    expect(convertNodesToIds(reevalGraph)).toEqual(expectedReevalGraph);
+  });
+
+  it('Correctly computes for 3-node cycle graph after breaking cycle', () => {
+    const graph = TestGraphs.makeMedium3NodeCycle();
+    // TODO: break up?
+    const expectedOrigReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['e']),
+      waiting: new Map<string, number>([['d', 1]]),
+    };
+
+    expect(convertNodesToIds(graph.makeReevaluationGraph())).toEqual(expectedOrigReevalGraph);
+
+    graph.evaluate();
+
+    graph.getNode('a')?.replace([], () => 2);
+
+    const expectedReevalGraph: ReevaluationGraphStateById = {
+      ready: new Set(['a']),
+      waiting: new Map<string, number>([
+        ['b', 1],
+        ['c', 1],
+      ]),
+    };
+
+    expect(convertNodesToIds(graph.makeReevaluationGraph())).toEqual(expectedReevalGraph);
+  });
+});
+
+describe('evaluation', () => {
+  function spyOnCalculates(g: Graph): Record<string, jest.SpyInstance> {
+    const spies: Record<string, jest.SpyInstance> = {};
+    for (const node of g) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      spies[node.id] = jest.spyOn(node as any, 'calculateFunction');
     }
+    return spies;
+  }
 
-    it('does first evaluation', () => {
-      const graph = TestGraphs.make3By3NuralNet();
+  it('does first evaluation', () => {
+    const graph = TestGraphs.make3By3NuralNet();
 
-      graph.evaluate();
+    graph.evaluate();
 
-      const expectedNodeStates: Record<string, NodeState<number>> = {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
-        d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.16) },
-        f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.05) },
-        g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.17) },
-        h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.105) },
-        i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.035) },
-      };
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+      c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
+      d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
+      e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.16) },
+      f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.05) },
+      g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.17) },
+      h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.105) },
+      i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.035) },
+    };
 
-      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+  });
+
+  it("first layer node's replacement causes downstream re-render", () => {
+    const graph = TestGraphs.make3By3NuralNet();
+    graph.evaluate();
+
+    // Replace value of c
+    graph.getNode('c')?.replace([], () => 0.3);
+
+    const spies = spyOnCalculates(graph);
+
+    // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
+    graph.evaluate();
+
+    expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
+      a: 0,
+      b: 0,
+      c: 1,
+      d: 0,
+      e: 1,
+      f: 1,
+      g: 1,
+      h: 1,
+      i: 1,
     });
 
-    it("first layer node's replacement causes downstream re-render", () => {
-      const graph = TestGraphs.make3By3NuralNet();
-      graph.evaluate();
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+      c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
+      d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
+      e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
+      f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.03) },
+      g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.206) },
+      h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.115) },
+      i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.021) },
+    };
 
-      // Replace value of c
-      graph.getNode('c')?.replace([], () => 0.3);
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+  });
 
-      const spies = spyOnCalculates(graph);
+  it("when invalidated node returns same result, dependents aren't reevaluated ", () => {
+    const graph = TestGraphs.make3By3NuralNet();
 
-      // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
-      graph.evaluate();
+    graph.evaluate();
 
-      expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
-        a: 0,
-        b: 0,
-        c: 1,
-        d: 0,
-        e: 1,
-        f: 1,
-        g: 1,
-        h: 1,
-        i: 1,
-      });
+    // Only b and c start unevaluated
+    graph.getNode('c')?.invalidate();
 
-      const expectedNodeStates: Record<string, NodeState<number>> = {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
-        d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
-        f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.03) },
-        g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.206) },
-        h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.115) },
-        i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.021) },
-      };
+    // Re-evaluate
+    const spies = spyOnCalculates(graph);
 
-      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+    // 'c' gets reevaluated but returns same result, so dependents aren't reevaluated
+    graph.evaluate();
+
+    expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
+      a: 0,
+      b: 0,
+      c: 1,
+      d: 0,
+      e: 0,
+      f: 0,
+      g: 0,
+      h: 0,
+      i: 0,
+    });
+  });
+
+  it('propagates evaluation errors', () => {
+    const graph = TestGraphs.make3By3NuralNet();
+    graph.evaluate();
+
+    // Replace value of c
+    graph.getNode('c')?.replace([], () => {
+      throw new Error();
     });
 
-    it("when invalidated node returns same result, dependents aren't reevaluated ", () => {
-      const graph = TestGraphs.make3By3NuralNet();
+    // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
+    graph.evaluate();
 
-      graph.evaluate();
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+      c: { status: NodeStatus.OwnError },
+      d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
+      e: { status: NodeStatus.DependencyError },
+      f: { status: NodeStatus.DependencyError },
+      g: { status: NodeStatus.DependencyError },
+      h: { status: NodeStatus.DependencyError },
+      i: { status: NodeStatus.DependencyError },
+    };
 
-      // Only b and c start unevaluated
-      graph.getNode('c')?.invalidate();
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+  });
 
-      // Re-evaluate
-      const spies = spyOnCalculates(graph);
+  it('Evaluates non-cycle node in graph with cycle', () => {
+    const graph = TestGraphs.makeSmallSelfCycle();
+    graph.evaluate();
 
-      // 'c' gets reevaluated but returns same result, so dependents aren't reevaluated
-      graph.evaluate();
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.CicularDependencyError },
+      b: { status: NodeStatus.Resolved, value: 1 },
+    };
 
-      expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
-        a: 0,
-        b: 0,
-        c: 1,
-        d: 0,
-        e: 0,
-        f: 0,
-        g: 0,
-        h: 0,
-        i: 0,
-      });
-    });
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+  });
 
-    it('propagates evaluation errors', () => {
-      const graph = TestGraphs.make3By3NuralNet();
-      graph.evaluate();
+  it('Evaluates successfully after breaking a self-cycle', () => {
+    const graph = TestGraphs.makeSmallSelfCycle();
+    graph.evaluate();
 
-      // Replace value of c
-      graph.getNode('c')?.replace([], () => {
-        throw new Error();
-      });
+    graph.getNode('a')?.replace([], () => 2);
+    graph.evaluate();
 
-      // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
-      graph.evaluate();
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.Resolved, value: 2 },
+      b: { status: NodeStatus.Resolved, value: 1 },
+    };
 
-      const expectedNodeStates: Record<string, NodeState<number>> = {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
-        c: { status: NodeStatus.OwnError },
-        d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
-        e: { status: NodeStatus.DependencyError },
-        f: { status: NodeStatus.DependencyError },
-        g: { status: NodeStatus.DependencyError },
-        h: { status: NodeStatus.DependencyError },
-        i: { status: NodeStatus.DependencyError },
-      };
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+  });
 
-      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
-    });
+  it('Evaluates non-cycle nodes of medium 3-node cycle', () => {
+    const graph = TestGraphs.makeMedium3NodeCycle();
+    graph.evaluate();
 
-    it('Evaluates non-cycle node in graph with cycle', () => {
-      const graph = TestGraphs.makeSmallSelfCycle();
-      graph.evaluate();
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.CicularDependencyError },
+      b: { status: NodeStatus.CicularDependencyError },
+      c: { status: NodeStatus.CicularDependencyError },
+      d: { status: NodeStatus.Resolved, value: 5 },
+      e: { status: NodeStatus.Resolved, value: 1 },
+    };
 
-      const expectedNodeStates: Record<string, NodeState<number>> = {
-        a: { status: NodeStatus.CicularDependencyError },
-        b: { status: NodeStatus.Resolved, value: 1 },
-      };
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
+  });
 
-      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
-    });
+  it('Evaluates after breaking a 3-node cycle', () => {
+    const graph = TestGraphs.makeMedium3NodeCycle();
+    graph.evaluate();
 
-    it('Evaluates successfully after breaking a self-cycle', () => {
-      const graph = TestGraphs.makeSmallSelfCycle();
-      graph.evaluate();
+    graph.getNode('a')?.replace([], () => 2);
+    graph.evaluate();
 
-      graph.getNode('a')?.replace([], () => 2);
-      graph.evaluate();
+    const expectedNodeStates: Record<string, NodeState<number>> = {
+      a: { status: NodeStatus.Resolved, value: 2 },
+      b: { status: NodeStatus.Resolved, value: 1 },
+      c: { status: NodeStatus.Resolved, value: 3 },
+      d: { status: NodeStatus.Resolved, value: 5 },
+      e: { status: NodeStatus.Resolved, value: 1 },
+    };
 
-      const expectedNodeStates: Record<string, NodeState<number>> = {
-        a: { status: NodeStatus.Resolved, value: 2 },
-        b: { status: NodeStatus.Resolved, value: 1 },
-      };
-
-      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
-    });
-
-    it('Evaluates after breaking a 3-node cycle', () => {
-      const graph = TestGraphs.makeMedium3NodeCycle();
-      graph.evaluate();
-
-      graph.getNode('a')?.replace([], () => 2);
-      graph.evaluate();
-
-      const expectedNodeStates: Record<string, NodeState<number>> = {
-        a: { status: NodeStatus.Resolved, value: 2 },
-        b: { status: NodeStatus.Resolved, value: 1 },
-      };
-
-      expect(getNodeStates(graph)).toEqual(expectedNodeStates);
-    });
+    expect(getNodeStates(graph)).toEqual(expectedNodeStates);
   });
 });
