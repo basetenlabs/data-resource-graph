@@ -1,7 +1,9 @@
 import assert from 'assert';
 import DataNode from '../DataNode/DataNode';
 
-// TODO: add some basic tests
+export type DfsVisitor =
+  | ((node: DataNode, stack: DataNode[]) => void)
+  | ((node: DataNode, stack: DataNode[]) => boolean);
 
 /**
  * Traverses the graph in depth-first order. Every node reachable from `startingNodes` will
@@ -10,12 +12,13 @@ import DataNode from '../DataNode/DataNode';
  *
  * @param startingNodes A starting collection of nodes to iterate from
  * @param visitor function that receives each node as well as the path from one of the starting
- * nodes up to but not including the current node
+ * nodes up to but not including the current node. If this is a boolean function, the return value
+ * indicated whether the search should continue traversing from this node.
  * @param direction Forward goes node -> dependents (direction of data). Backward goes node -> dependencies
  */
 export default function dfs(
   startingNodes: DataNode[],
-  visitor: (node: DataNode, stack: DataNode[]) => void,
+  visitor: DfsVisitor,
   direction: 'forward' | 'backward' = 'forward',
 ): void {
   const visited = new Set<DataNode>();
@@ -26,18 +29,19 @@ export default function dfs(
   function visitHelperer(node: DataNode) {
     if (visited.has(node)) return;
 
-    visitor(node, stack);
+    const result = visitor(node, stack);
 
     if (stack.includes(node)) {
       // Short circuit search if we've found a cycle
       return;
     }
 
-    stack.push(node);
-
-    (direction === 'forward' ? node.dependents : node.dependencies).forEach(visitHelperer);
-
-    assert(stack.pop() === node, 'Stack in bad state');
+    if (result === undefined || result == true) {
+      // Recurse
+      stack.push(node);
+      (direction === 'forward' ? node.dependents : node.dependencies).forEach(visitHelperer);
+      assert(stack.pop() === node, 'Stack in bad state');
+    }
     visited.add(node);
   }
 

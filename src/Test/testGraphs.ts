@@ -40,7 +40,6 @@ const testGraphs = {
       .addNode('e', ['b', 'd'])
       .addNode('f', ['b'], { isObserved: false }).graph,
 
-  // 3x3 neural net
   make3By3NuralNet: () =>
     graphBuilder<number>()
       .addNode('a', [], { fn: () => -0.3 })
@@ -56,6 +55,16 @@ const testGraphs = {
         fn: (d, e, f) => 0.3 * d + 0.2 * e + 0.1 * f,
       })
       .addNode('i', ['e', 'f'], { fn: (e, f) => 0 * e + 0.7 * f }).graph,
+
+  make7NodeBinaryTree: () =>
+    graphBuilder<number>()
+      .addNode('d', [])
+      .addNode('b', ['d'])
+      .addNode('a', ['b'])
+      .addNode('c', ['b'])
+      .addNode('f', ['d'])
+      .addNode('e', ['f'])
+      .addNode('g', ['f']).graph,
 } as const;
 
 export default testGraphs;
