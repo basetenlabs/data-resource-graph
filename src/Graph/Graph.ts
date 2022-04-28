@@ -70,9 +70,11 @@ class Graph implements Iterable<DataNode> {
     dfs(
       Array.from(unevaluated),
       (node) => {
-        if (node.state.status !== NodeStatus.CicularDependencyError) {
-          unevaluated.add(node);
+        if (node.state.status === NodeStatus.CicularDependencyError) {
+          return false;
         }
+        unevaluated.add(node);
+        return true;
       },
       'forward',
     );
