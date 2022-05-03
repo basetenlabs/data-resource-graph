@@ -21,7 +21,7 @@ class Graph implements Iterable<DataNode> {
     dependencies: DataNodesOf<TArgs>,
     calculate: (...args: TArgs) => TResult,
   ): DataNode<TResult> {
-    this.assertTransaction('addNode');
+    this.assertTransaction('Graph.addNode()');
 
     if (this.nodes.has(id)) {
       throw new Error(`Node with id ${id} already exists`);
@@ -43,25 +43,10 @@ class Graph implements Iterable<DataNode> {
     return newNode;
   }
 
-  public deleteNode(id: string): void {
-    this.assertTransaction('deleteNode');
+  public deleteNodeInternal(node: DataNode): void {
+    this.assertTransaction('Graph.deleteNode()');
 
-    const node = this.getNode(id);
-    if (!node) {
-      throw new Error(`Node with id ${id} doesn't exist`);
-    }
-
-    // Mark all dependents as unevaluated since they've entered an error state
-    node.state = { status: NodeStatus.Deleted };
-    for (const dependent of node.dependents) {
-      dependent.invalidate();
-    }
-    // Remove dependencies to self
-    for (const dep of node.dependencies) {
-      dep.dependents.delete(node);
-    }
-
-    this.nodes.delete(id);
+    this.nodes.delete(node.id);
   }
 
   private makeReevaluationGraph(): ReevaluationGraphState {

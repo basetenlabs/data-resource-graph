@@ -417,7 +417,7 @@ describe('evaluation', () => {
 
       // Act
       graph.act(() => {
-        graph.deleteNode('d');
+        graph.getNode('d')?.delete();
       });
 
       // Assert
@@ -425,7 +425,7 @@ describe('evaluation', () => {
         a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
         b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
         c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        e: { status: NodeStatus.MissingDependencyError },
+        e: { status: NodeStatus.DependencyError },
       });
     });
 
@@ -436,7 +436,7 @@ describe('evaluation', () => {
 
       // Act
       graph.act(() => {
-        graph.deleteNode('c');
+        graph.getNode('c')?.delete();
       });
 
       // Assert
@@ -455,7 +455,7 @@ describe('evaluation', () => {
 
       // Act
       graph.act(() => {
-        graph.deleteNode('d');
+        graph.getNode('d')?.delete();
       });
 
       graph.act(() => {

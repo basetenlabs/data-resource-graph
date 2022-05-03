@@ -31,7 +31,6 @@ export function isErrorStatus(status: NodeStatus): boolean {
     case NodeStatus.OwnError:
     case NodeStatus.DependencyError:
     case NodeStatus.CicularDependencyError:
-    case NodeStatus.MissingDependencyError:
     case NodeStatus.InternalError:
     case NodeStatus.Deleted:
       return true;

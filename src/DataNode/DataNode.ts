@@ -36,7 +36,7 @@ class DataNode<TResult = unknown> {
 
   public addObserver(observer: Observer<TResult>): void {
     this.assertNotDeleted();
-    this.graph.assertTransaction('addObserver');
+    this.graph.assertTransaction('DataNode.addObserver()');
 
     if (this.observers.includes(observer)) return;
     this.observers.push(observer);
@@ -44,7 +44,7 @@ class DataNode<TResult = unknown> {
 
   public removeObserver(observer: Observer<TResult>): void {
     this.assertNotDeleted();
-    this.graph.assertTransaction('removeObserver');
+    this.graph.assertTransaction('DataNode.removeObserver()');
 
     const index = this.observers.indexOf(observer);
     if (index < 0) return;
@@ -67,7 +67,7 @@ class DataNode<TResult = unknown> {
    */
   public invalidate(): void {
     this.assertNotDeleted();
-    this.graph.assertTransaction('invalidate');
+    this.graph.assertTransaction('DataNode.invalidate()');
     this.state = { status: NodeStatus.Unevaluated };
   }
 
@@ -77,7 +77,7 @@ class DataNode<TResult = unknown> {
   ): void;
   public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
     this.assertNotDeleted();
-    this.graph.assertTransaction('replace');
+    this.graph.assertTransaction('DataNode.replace()');
 
     // If graph was part of a cycle, remove circular dependency error from
     // all dependencies that are part of a cycle since they may have been part of the same cycle.
@@ -133,12 +133,6 @@ class DataNode<TResult = unknown> {
       const dependencyValues: unknown[] = [];
       for (const depState of depStates) {
         // Is dependency in an errored state?
-        if (depState.status === NodeStatus.Deleted) {
-          this.state = {
-            status: NodeStatus.MissingDependencyError,
-          };
-          return;
-        }
 
         if (isErrorStatus(depState.status)) {
           this.state = {
@@ -185,6 +179,24 @@ class DataNode<TResult = unknown> {
         state: this.state,
       };
     }
+  }
+
+  public delete(): void {
+    this.graph.assertTransaction('DataNode.delete()');
+    if (this.isDeleted()) return;
+
+    this.state = { status: NodeStatus.Deleted };
+
+    // Mark all dependents as unevaluated since they've entered an error state
+    for (const dependent of this.dependents) {
+      dependent.invalidate();
+    }
+    // Remove dependencies to self
+    for (const dep of this.dependencies) {
+      dep.dependents.delete(this);
+    }
+    // Remove from graph
+    this.graph.deleteNodeInternal(this);
   }
 
   public isDeleted(): boolean {

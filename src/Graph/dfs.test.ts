@@ -44,7 +44,7 @@ describe('forward-traversal', () => {
 
   test('medium DAG skips deleted nodes', () => {
     const graph = testGraphs.makeMediumDAG();
-    graph.act(() => graph.deleteNode('b'));
+    graph.act(() => graph.getNode('b')?.delete());
     const nodeC = graph.getNode('c');
     assert(nodeC);
     dfs([nodeC], wrappedVisitor, 'forward');
