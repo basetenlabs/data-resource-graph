@@ -1,5 +1,6 @@
 import assert from 'assert';
 import dfs from '../Graph/dfs';
+import Graph from '../Graph/Graph';
 import { shallowEquals } from '../utils';
 import { NodeState, NodeStatus, Observer } from './NodeTypes';
 import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
@@ -19,6 +20,7 @@ class DataNode<TResult = unknown> {
   private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
 
   constructor(
+    public readonly graph: Graph,
     public readonly id: string,
     public dependencies: DataNode[],
     private calculateFunction: (...args: unknown[]) => TResult,
@@ -32,11 +34,15 @@ class DataNode<TResult = unknown> {
   private observers: Observer<any>[] = [];
 
   public addObserver(observer: Observer<TResult>): void {
+    this.graph.assertTransaction('addObserver');
+
     if (this.observers.includes(observer)) return;
     this.observers.push(observer);
   }
 
   public removeObserver(observer: Observer<TResult>): void {
+    this.graph.assertTransaction('removeObserver');
+
     const index = this.observers.indexOf(observer);
     if (index < 0) return;
     this.observers.splice(index, 1);
@@ -46,13 +52,19 @@ class DataNode<TResult = unknown> {
     return this.observers.length > 0;
   }
 
+  public notifyObservers(): void {
+    for (const observer of this.observers) {
+      observer(this.state);
+    }
+  }
+
   /**
    * Value has changed, e.g. for dependency-free data. Won't use cached
    * value except for detecting unchanged evaluation
    */
   public invalidate(): void {
+    this.graph.assertTransaction('invalidate');
     this.state = { status: NodeStatus.Unevaluated };
-    // TODO: trigger recalculation
   }
 
   public replace<TArgs extends unknown[]>(
@@ -60,6 +72,8 @@ class DataNode<TResult = unknown> {
     calculate: (...args: TArgs) => TResult,
   ): void;
   public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
+    this.graph.assertTransaction('replace');
+
     // If graph was part of a cycle, remove circular dependency error from
     // all dependencies that are part of a cycle since they may have been part of the same cycle.
     // When the graph is re-evaluated, any nodes that are still part of a cycle will be
@@ -139,13 +153,16 @@ class DataNode<TResult = unknown> {
         return;
       }
 
-      // TODO: short circuit on different equality check (e.g. structural equality) provided
-
       this.state = {
         status: NodeStatus.Resolved,
         value: value,
       };
     } finally {
+      // Check if state changed
+      if (!this.lastEvaluation || !areStatesEqual(this.state, this.lastEvaluation.state)) {
+        // TODO: short circuit on different equality check (e.g. structural equality) provided
+        this.graph.transaction?.observedNodesChanged.add(this);
+      }
       // Ensure lastEvaluation is set on return
       this.lastEvaluation = {
         dependencyStates: depStates,
@@ -155,7 +172,7 @@ class DataNode<TResult = unknown> {
     }
   }
 
-  [Symbol.toStringTag] = (): string => `DataNode(${this.id})`;
+  [Symbol.toStringTag] = `DataNode(${this.id})`;
 }
 
 export default DataNode;

@@ -7,3 +7,7 @@ export interface ReevaluationGraphState {
    */
   waiting: Map<DataNode, number>;
 }
+
+export interface Transaction {
+  observedNodesChanged: Set<DataNode>;
+}

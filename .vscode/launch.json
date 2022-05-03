@@ -9,7 +9,21 @@
       "request": "launch",
       "runtimeArgs": [
         "test",
-        "--run-in-band"
+        "--run-in-band",
+      ],
+      "runtimeExecutable": "npm",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "type": "node"
+    },
+    {
+      "name": "Debug current test file",
+      "request": "launch",
+      "runtimeArgs": [
+        "test",
+        "--run-in-band",
+        "${relativeFile}"
       ],
       "runtimeExecutable": "npm",
       "skipFiles": [

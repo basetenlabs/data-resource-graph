@@ -22,3 +22,5 @@ export function mapNodesToIds(val: unknown): unknown {
     return mapValues(val, mapNodesToIds);
   }
 }
+
+export function noopObserver(): void {}

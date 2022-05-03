@@ -3,6 +3,7 @@ import mapValues from 'lodash/mapValues';
 import { NodeState, NodeStatus } from '../DataNode/NodeTypes';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
+import { noopObserver } from '../Test/testUtils';
 import Graph from './Graph';
 import { ReevaluationGraphState } from './types';
 
@@ -20,7 +21,7 @@ describe('cycle detection', () => {
   it('Detects self-reference', () => {
     const graph = TestGraphs.makeSmallSelfCycle();
 
-    graph.makeReevaluationGraph();
+    graph.makeReevaluationGraphFromObserved(Array.from(graph));
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.CicularDependencyError,
@@ -31,7 +32,7 @@ describe('cycle detection', () => {
   it('Detects no cycle in acyclic graph', () => {
     const graph = TestGraphs.makeMediumAcylic();
 
-    graph.makeReevaluationGraph();
+    graph.makeReevaluationGraphFromObserved(Array.from(graph));
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.Unevaluated,
@@ -45,7 +46,7 @@ describe('cycle detection', () => {
   it('Detects 3-node cycle', () => {
     const graph = TestGraphs.makeMedium3NodeCycle();
 
-    graph.makeReevaluationGraph();
+    graph.makeReevaluationGraphFromObserved(Array.from(graph));
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.CicularDependencyError,
@@ -59,7 +60,7 @@ describe('cycle detection', () => {
   it('Detects figure-eight cycle', () => {
     const graph = TestGraphs.makeMediumFigureEightCycle();
 
-    graph.makeReevaluationGraph();
+    graph.makeReevaluationGraphFromObserved(Array.from(graph));
 
     expect(getNodeStatuses(graph)).toEqual({
       a: NodeStatus.CicularDependencyError,
@@ -71,11 +72,13 @@ describe('cycle detection', () => {
   });
 });
 
-describe('makeReevaluationGraph', () => {
+describe.skip('makeReevaluationGraphFromObserved', () => {
   type ReevaluationGraphStateById = {
     ready: Set<string>;
     waiting: Map<string, number>;
   };
+
+  // TODO: replace with mapNodesToIds
   function convertNodesToIds(state: ReevaluationGraphState): ReevaluationGraphStateById {
     return {
       ready: new Set(Array.from(state.ready).map((node) => node.id)),
@@ -90,12 +93,23 @@ describe('makeReevaluationGraph', () => {
 
   it('correctly computes for medium DAG', () => {
     const graph = TestGraphs.makeMediumDAG();
-    graph.evaluate();
-    // Only b and c start unevaluated
-    graph.getNode('b')?.invalidate();
-    graph.getNode('c')?.invalidate();
+    graph.act(() => {
+      for (const node of graph) {
+        node.addObserver(noopObserver);
+      }
+    });
+    graph.act(() => {
+      for (const node of graph) {
+        node.removeObserver(noopObserver);
+      }
+      // Only b and c start unevaluated
+      graph.getNode('b')?.invalidate();
+      graph.getNode('c')?.invalidate();
+    });
 
-    const reevalGraph = graph.makeReevaluationGraph();
+    const reevalGraph = graph.makeReevaluationGraphFromObserved(
+      Array.from(graph).filter((node) => node.id !== 'f'),
+    );
     const expectedReevalGraph: ReevaluationGraphStateById = {
       ready: new Set(['c']),
       waiting: new Map<string, number>([
@@ -114,7 +128,7 @@ describe('makeReevaluationGraph', () => {
     graph.getNode('a')?.invalidate();
     graph.getNode('f')?.invalidate();
 
-    const reevalGraph = graph.makeReevaluationGraph();
+    const reevalGraph = graph.makeReevaluationGraphFromObserved(Array.from(graph));
     const expectedReevalGraph: ReevaluationGraphStateById = {
       ready: new Set(['a', 'f']),
       waiting: new Map<string, number>([
@@ -136,7 +150,7 @@ describe('makeReevaluationGraph', () => {
     graph.getNode('c')?.invalidate();
     graph.getNode('g')?.invalidate();
 
-    const reevalGraph = graph.makeReevaluationGraph();
+    const reevalGraph = graph.makeReevaluationGraphFromObserved(Array.from(graph));
     const expectedReevalGraph: ReevaluationGraphStateById = {
       ready: new Set(['c']),
       waiting: new Map<string, number>([
@@ -154,7 +168,7 @@ describe('makeReevaluationGraph', () => {
   it('Correctly computes for small graph with cycle', () => {
     const graph = TestGraphs.makeSmallSelfCycle();
 
-    const reevalGraph = graph.makeReevaluationGraph();
+    const reevalGraph = graph.makeReevaluationGraphFromObserved(Array.from(graph));
 
     const expectedReevalGraph: ReevaluationGraphStateById = {
       ready: new Set(['b']),
@@ -169,7 +183,7 @@ describe('makeReevaluationGraph', () => {
     graph.evaluate();
 
     graph.getNode('a')?.replace([], () => 2);
-    const reevalGraph = graph.makeReevaluationGraph();
+    const reevalGraph = graph.makeReevaluationGraphFromObserved(Array.from(graph));
 
     const expectedReevalGraph: ReevaluationGraphStateById = {
       ready: new Set(['a']),
@@ -187,7 +201,9 @@ describe('makeReevaluationGraph', () => {
       waiting: new Map<string, number>([['d', 1]]),
     };
 
-    expect(convertNodesToIds(graph.makeReevaluationGraph())).toEqual(expectedOrigReevalGraph);
+    expect(convertNodesToIds(graph.makeReevaluationGraphFromObserved(Array.from(graph)))).toEqual(
+      expectedOrigReevalGraph,
+    );
 
     graph.evaluate();
 
@@ -201,7 +217,9 @@ describe('makeReevaluationGraph', () => {
       ]),
     };
 
-    expect(convertNodesToIds(graph.makeReevaluationGraph())).toEqual(expectedReevalGraph);
+    expect(convertNodesToIds(graph.makeReevaluationGraphFromObserved(Array.from(graph)))).toEqual(
+      expectedReevalGraph,
+    );
   });
 });
 
@@ -215,11 +233,22 @@ describe('evaluation', () => {
     return spies;
   }
 
+  function observeAll(graph: Graph) {
+    for (const node of graph) {
+      node.addObserver(noopObserver);
+    }
+  }
+
   it('does first evaluation', () => {
+    // Arrange
     const graph = TestGraphs.make3By3NuralNet();
 
-    graph.evaluate();
+    // Act
+    graph.act(() => {
+      observeAll(graph);
+    });
 
+    // assert
     const expectedNodeStates: Record<string, NodeState<number>> = {
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
       b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
@@ -236,17 +265,22 @@ describe('evaluation', () => {
   });
 
   it("first layer node's replacement causes downstream re-render", () => {
+    // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    graph.evaluate();
+    graph.act(() => {
+      observeAll(graph);
+    });
 
-    // Replace value of c
-    graph.getNode('c')?.replace([], () => 0.3);
+    // Act
+    let spies;
 
-    const spies = spyOnCalculates(graph);
+    graph.act(() => {
+      // Replace value of c
+      graph.getNode('c')?.replace([], () => 0.3);
+      spies = spyOnCalculates(graph);
+    });
 
-    // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
-    graph.evaluate();
-
+    // Assert
     expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
       a: 0,
       b: 0,
@@ -275,19 +309,23 @@ describe('evaluation', () => {
   });
 
   it("when invalidated node returns same result, dependents aren't reevaluated ", () => {
+    // Arrange
     const graph = TestGraphs.make3By3NuralNet();
+    graph.act(() => {
+      observeAll(graph);
+    });
 
-    graph.evaluate();
+    // Act
+    let spies;
+    graph.act(() => {
+      // 'c' gets reevaluated but returns same result, so dependents aren't reevaluated
+      graph.getNode('c')?.invalidate();
 
-    // Only b and c start unevaluated
-    graph.getNode('c')?.invalidate();
+      // Re-evaluate
+      spies = spyOnCalculates(graph);
+    });
 
-    // Re-evaluate
-    const spies = spyOnCalculates(graph);
-
-    // 'c' gets reevaluated but returns same result, so dependents aren't reevaluated
-    graph.evaluate();
-
+    // Assert
     expect(mapValues(spies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
       a: 0,
       b: 0,
@@ -302,17 +340,21 @@ describe('evaluation', () => {
   });
 
   it('propagates evaluation errors', () => {
+    // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    graph.evaluate();
-
-    // Replace value of c
-    graph.getNode('c')?.replace([], () => {
-      throw new Error();
+    graph.act(() => {
+      observeAll(graph);
     });
 
-    // 'c' gets reevaluated, returns different result, downstream nodes re-evaluated
-    graph.evaluate();
+    // Act
+    graph.act(() => {
+      // Replace value of c
+      graph.getNode('c')?.replace([], () => {
+        throw new Error();
+      });
+    });
 
+    // Assert
     const expectedNodeStates: Record<string, NodeState<number>> = {
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
       b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
@@ -329,9 +371,15 @@ describe('evaluation', () => {
   });
 
   it('Evaluates non-cycle node in graph with cycle', () => {
+    // Arrange
     const graph = TestGraphs.makeSmallSelfCycle();
-    graph.evaluate();
 
+    // Act
+    graph.act(() => {
+      observeAll(graph);
+    });
+
+    // Assert
     const expectedNodeStates: Record<string, NodeState<number>> = {
       a: { status: NodeStatus.CicularDependencyError },
       b: { status: NodeStatus.Resolved, value: 1 },
@@ -341,12 +389,18 @@ describe('evaluation', () => {
   });
 
   it('Evaluates successfully after breaking a self-cycle', () => {
+    // Arrange
     const graph = TestGraphs.makeSmallSelfCycle();
-    graph.evaluate();
+    graph.act(() => {
+      observeAll(graph);
+    });
 
-    graph.getNode('a')?.replace([], () => 2);
-    graph.evaluate();
+    // Act
+    graph.act(() => {
+      graph.getNode('a')?.replace([], () => 2);
+    });
 
+    // Assert
     const expectedNodeStates: Record<string, NodeState<number>> = {
       a: { status: NodeStatus.Resolved, value: 2 },
       b: { status: NodeStatus.Resolved, value: 1 },
@@ -356,9 +410,15 @@ describe('evaluation', () => {
   });
 
   it('Evaluates non-cycle nodes of medium 3-node cycle', () => {
+    // Arrange
     const graph = TestGraphs.makeMedium3NodeCycle();
-    graph.evaluate();
 
+    // Act
+    graph.act(() => {
+      observeAll(graph);
+    });
+
+    // Assert
     const expectedNodeStates: Record<string, NodeState<number>> = {
       a: { status: NodeStatus.CicularDependencyError },
       b: { status: NodeStatus.CicularDependencyError },
@@ -371,11 +431,18 @@ describe('evaluation', () => {
   });
 
   it('Evaluates after breaking a 3-node cycle', () => {
+    // Arrange
     const graph = TestGraphs.makeMedium3NodeCycle();
-    graph.evaluate();
 
-    graph.getNode('a')?.replace([], () => 2);
-    graph.evaluate();
+    // Act
+    graph.act(() => {
+      observeAll(graph);
+    });
+
+    // Assert
+    graph.act(() => {
+      graph.getNode('a')?.replace([], () => 2);
+    });
 
     const expectedNodeStates: Record<string, NodeState<number>> = {
       a: { status: NodeStatus.Resolved, value: 2 },

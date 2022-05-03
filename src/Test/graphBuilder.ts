@@ -9,12 +9,13 @@ export type GraphBuilder<TValue> = {
     calculateFn?: (...args: TValue[]) => TValue,
     partialOptions?: Partial<NodeOptions>,
   ): GraphBuilder<TValue>;
+  act(callback: (graphBuilder: GraphBuilder<TValue>) => void): GraphBuilder<TValue>;
   graph: Graph;
 };
 
 export type NodeOptions = {
   /**
-   * @default true
+   * @default false
    */
   isObserved: boolean;
 };
@@ -22,7 +23,7 @@ export type NodeOptions = {
 const noop = () => {};
 
 const defaultOptions: NodeOptions = {
-  isObserved: true,
+  isObserved: false,
 };
 
 /**
@@ -58,6 +59,10 @@ export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphB
 
       if (options.isObserved) node.addObserver(noop);
 
+      return graphBuilder;
+    },
+    act(callback) {
+      graph.act(() => callback(graphBuilder));
       return graphBuilder;
     },
   };
