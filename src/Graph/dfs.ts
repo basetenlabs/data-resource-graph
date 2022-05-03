@@ -25,9 +25,12 @@ export default function dfs(
 
   const stack: DataNode[] = [];
 
-  // Depth-first backwards-traverse graph from observed, detecting cycles and finding unevaluated nodes
   function visitHelperer(node: DataNode) {
     if (visited.has(node)) return;
+
+    // Deleted nodes aren't automatically removed, but they're not part of the graph
+    // and so shouldn't be traversed.
+    if (node.isDeleted()) return;
 
     const result = visitor(node, stack);
 

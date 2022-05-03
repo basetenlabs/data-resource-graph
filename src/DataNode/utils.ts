@@ -33,6 +33,7 @@ export function isErrorStatus(status: NodeStatus): boolean {
     case NodeStatus.CicularDependencyError:
     case NodeStatus.MissingDependencyError:
     case NodeStatus.InternalError:
+    case NodeStatus.Deleted:
       return true;
     default:
       unreachable(status);

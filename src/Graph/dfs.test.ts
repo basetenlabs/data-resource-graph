@@ -41,6 +41,15 @@ describe('forward-traversal', () => {
     dfs([nodeB, nodeC], wrappedVisitor, 'forward');
     expectTraversal([['b'], ['b', 'e'], ['b', 'f'], ['c'], ['c', 'd']]);
   });
+
+  test('medium DAG skips deleted nodes', () => {
+    const graph = testGraphs.makeMediumDAG();
+    graph.act(() => graph.deleteNode('b'));
+    const nodeC = graph.getNode('c');
+    assert(nodeC);
+    dfs([nodeC], wrappedVisitor, 'forward');
+    expectTraversal([['c'], ['c', 'd'], ['c', 'd', 'e']]);
+  });
 });
 
 describe('backward-traversal', () => {

@@ -17,6 +17,8 @@ enum NodeStatus {
   MissingDependencyError = 'missingDepError',
   // Graph was in unexpected state
   InternalError = 'internalError',
+  // Node is deleted
+  Deleted = 'deleted',
 }
 
 type NodeState<TResult> =
@@ -32,7 +34,8 @@ type NodeState<TResult> =
         | NodeStatus.CicularDependencyError
         // TODO: include dependency path
         | NodeStatus.MissingDependencyError
-        | NodeStatus.InternalError;
+        | NodeStatus.InternalError
+        | NodeStatus.Deleted;
     }
   | {
       status: NodeStatus.Resolved;

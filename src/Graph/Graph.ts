@@ -43,9 +43,25 @@ class Graph implements Iterable<DataNode> {
     return newNode;
   }
 
-  public deleteNode(_id: string): void {
-    // TODO: Mark all dependents as DependencyError
+  public deleteNode(id: string): void {
     this.assertTransaction('deleteNode');
+
+    const node = this.getNode(id);
+    if (!node) {
+      throw new Error(`Node with id ${id} doesn't exist`);
+    }
+
+    // Mark all dependents as unevaluated since they've entered an error state
+    node.state = { status: NodeStatus.Deleted };
+    for (const dependent of node.dependents) {
+      dependent.invalidate();
+    }
+    // Remove dependencies to self
+    for (const dep of node.dependencies) {
+      dep.dependents.delete(node);
+    }
+
+    this.nodes.delete(id);
   }
 
   private makeReevaluationGraph(): ReevaluationGraphState {

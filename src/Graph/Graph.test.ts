@@ -224,24 +224,24 @@ describe('evaluation', () => {
     });
   });
 
-  describe('cyclical graphs', () => {
-    it('evaluates for medium acyclic', () => {
-      // Arrange
-      const graph = TestGraphs.makeMediumAcylic();
+  it('evaluates for medium acyclic', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
 
-      // Act
-      observeAll(graph);
+    // Act
+    observeAll(graph);
 
-      // Assert
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
-      });
+    // Assert
+    expectNodeStates(graph, {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+      c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+      d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
+      e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
     });
+  });
 
+  describe('cyclical graphs', () => {
     it('evaluates non-cycle node in graph with cycle', () => {
       // Arrange
       const graph = TestGraphs.makeSmallSelfCycle();
@@ -405,6 +405,71 @@ describe('evaluation', () => {
         g: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.17) },
         h: expect.anything(),
         i: expect.anything(),
+      });
+    });
+  });
+
+  describe('delete nodes', () => {
+    it('deletes middle node', () => {
+      // Arrange
+      const graph = TestGraphs.makeMediumAcylic();
+      observeAll(graph);
+
+      // Act
+      graph.act(() => {
+        graph.deleteNode('d');
+      });
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+        e: { status: NodeStatus.MissingDependencyError },
+      });
+    });
+
+    it('deletes leaf node', () => {
+      // Arrange
+      const graph = TestGraphs.makeMediumAcylic();
+      observeAll(graph);
+
+      // Act
+      graph.act(() => {
+        graph.deleteNode('c');
+      });
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+        d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
+        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
+      });
+    });
+
+    it('recovers after node with missing dependency replaced', () => {
+      // Arrange
+      const graph = TestGraphs.makeMediumAcylic();
+      observeAll(graph);
+
+      // Act
+      graph.act(() => {
+        graph.deleteNode('d');
+      });
+
+      graph.act(() => {
+        graph
+          .getNode('e')
+          ?.replace([assertDefined(graph.getNode('a') as DataNode<number>)], (a) => 0.2 * a);
+      });
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+        e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.08) },
       });
     });
   });

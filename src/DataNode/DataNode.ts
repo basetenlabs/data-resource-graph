@@ -18,6 +18,14 @@ export type DataNodesOf<TArgs extends unknown[]> = { [Key in keyof TArgs]: DataN
 class DataNode<TResult = unknown> {
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
   private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public dependents = new Set<DataNode<any>>();
+
+  // Use any to avoid problems with assigning DataNode<X> to DataNode<unknown>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private observers: Observer<any>[] = [];
+
+  [Symbol.toStringTag] = `DataNode('${this.id}')`;
 
   constructor(
     public readonly graph: Graph,
@@ -26,14 +34,8 @@ class DataNode<TResult = unknown> {
     private calculateFunction: (...args: unknown[]) => TResult,
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public dependents = new Set<DataNode<any>>();
-
-  // Use any to avoid problems with assigning DataNode<X> to DataNode<unknown>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private observers: Observer<any>[] = [];
-
   public addObserver(observer: Observer<TResult>): void {
+    this.assertNotDeleted();
     this.graph.assertTransaction('addObserver');
 
     if (this.observers.includes(observer)) return;
@@ -41,6 +43,7 @@ class DataNode<TResult = unknown> {
   }
 
   public removeObserver(observer: Observer<TResult>): void {
+    this.assertNotDeleted();
     this.graph.assertTransaction('removeObserver');
 
     const index = this.observers.indexOf(observer);
@@ -63,6 +66,7 @@ class DataNode<TResult = unknown> {
    * value except for detecting unchanged evaluation
    */
   public invalidate(): void {
+    this.assertNotDeleted();
     this.graph.assertTransaction('invalidate');
     this.state = { status: NodeStatus.Unevaluated };
   }
@@ -72,6 +76,7 @@ class DataNode<TResult = unknown> {
     calculate: (...args: TArgs) => TResult,
   ): void;
   public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
+    this.assertNotDeleted();
     this.graph.assertTransaction('replace');
 
     // If graph was part of a cycle, remove circular dependency error from
@@ -95,7 +100,7 @@ class DataNode<TResult = unknown> {
           `Internal error: Graph inconsistency between ${this}.dependencies and ${dependencies}.dependents`,
         );
 
-        dependency.dependents.add(this);
+        dependency.dependents.delete(this);
       }
     }
 
@@ -110,6 +115,8 @@ class DataNode<TResult = unknown> {
   }
 
   public evaluate(): void {
+    this.assertNotDeleted();
+
     const depStates = this.dependencies.map((dep) => dep.state);
     try {
       if (this.lastEvaluation && this.state.status !== NodeStatus.Unevaluated) {
@@ -126,12 +133,20 @@ class DataNode<TResult = unknown> {
       const dependencyValues: unknown[] = [];
       for (const depState of depStates) {
         // Is dependency in an errored state?
+        if (depState.status === NodeStatus.Deleted) {
+          this.state = {
+            status: NodeStatus.MissingDependencyError,
+          };
+          return;
+        }
+
         if (isErrorStatus(depState.status)) {
           this.state = {
             status: NodeStatus.DependencyError,
           };
           return;
         }
+
         if (depState.status !== NodeStatus.Resolved) {
           console.error('DataNode.evalate() called with dependency in unresolved state');
           this.state = {
@@ -172,7 +187,15 @@ class DataNode<TResult = unknown> {
     }
   }
 
-  [Symbol.toStringTag] = `DataNode('${this.id}')`;
+  public isDeleted(): boolean {
+    return this.state.status === NodeStatus.Deleted;
+  }
+
+  private assertNotDeleted() {
+    if (this.isDeleted()) {
+      throw new Error('Operation on deleted node');
+    }
+  }
 }
 
 export default DataNode;
