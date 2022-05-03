@@ -172,7 +172,7 @@ class DataNode<TResult = unknown> {
     }
   }
 
-  [Symbol.toStringTag] = `DataNode(${this.id})`;
+  [Symbol.toStringTag] = `DataNode('${this.id}')`;
 }
 
 export default DataNode;

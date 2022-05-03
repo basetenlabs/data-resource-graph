@@ -6,14 +6,19 @@ const testGraphs = {
       builder.addNode('a', ['a'], (a) => a + 1).addNode('b', [], () => 1),
     ).graph,
 
-  makeMediumAcylic: () =>
+  makeSmallAcyclic: () =>
     graphBuilder().act((builder) =>
+      builder.addNode('a', []).addNode('b', ['a']).addNode('c', ['a']),
+    ).graph,
+
+  makeMediumAcylic: () =>
+    graphBuilder(0).act((builder) =>
       builder
-        .addNode('a', [])
-        .addNode('b', [])
-        .addNode('c', ['a', 'b'])
-        .addNode('d', ['b'])
-        .addNode('e', ['a', 'd']),
+        .addNode('a', [], () => -0.4)
+        .addNode('b', [], () => -0.5)
+        .addNode('c', ['a', 'b'], (a, b) => 0.9 * a + -0.4 * b)
+        .addNode('d', ['b'], (b) => 0.2 * b)
+        .addNode('e', ['a', 'd'], (a, d) => 0.2 * a + -0.9 * d),
     ).graph,
 
   makeMedium3NodeCycle: () =>

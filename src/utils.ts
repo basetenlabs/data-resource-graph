@@ -1,3 +1,5 @@
+import isNil from 'lodash/isNil';
+
 export function takeFromSet<T>(set: Set<T>): T | undefined {
   for (const el of set) {
     set.delete(el);
@@ -22,4 +24,12 @@ export function shallowEquals<T>(arr1: T[], arr2: T[]): boolean {
  */
 export function unreachable(condition: never): never {
   throw new Error(`Not expecting condition: ${condition}`);
+}
+
+export function assertDefined<T>(val: T | null | undefined): T {
+  if (isNil(val)) {
+    throw new Error(`Expected defined but got ${val}`);
+  }
+
+  return val;
 }

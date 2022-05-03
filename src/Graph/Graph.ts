@@ -48,10 +48,9 @@ class Graph implements Iterable<DataNode> {
     this.assertTransaction('deleteNode');
   }
 
-  /**
-   * @internal
-   */
-  public makeReevaluationGraphFromObserved(observed: DataNode[]): ReevaluationGraphState {
+  private makeReevaluationGraph(): ReevaluationGraphState {
+    const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
+
     const unevaluated = new Set<DataNode>();
     const observedSet = new Set<DataNode>();
 
@@ -113,11 +112,8 @@ class Graph implements Iterable<DataNode> {
     return reevaluationGraph;
   }
 
-  // TODO: make private
-  public evaluate(): void {
-    const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
-
-    const { ready, waiting } = this.makeReevaluationGraphFromObserved(observed);
+  private evaluate(): void {
+    const { ready, waiting } = this.makeReevaluationGraph();
 
     let readyNode: DataNode | undefined;
 
