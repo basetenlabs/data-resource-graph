@@ -19,37 +19,37 @@ function expectNodeStates(graph: Graph, expectedNodeStates: Record<string, NodeS
   expect(getNodeStates(graph)).toEqual(expectedNodeStates);
 }
 
-describe('evaluation', () => {
-  let calculateSpies: Record<string, jest.SpyInstance> | undefined;
-
-  beforeEach(() => {
-    calculateSpies = undefined;
-  });
-
-  // Allows us to see how many times each evaluate function was called
-  function spyOnCalculates(g: Graph): void {
-    calculateSpies = {};
-    for (const node of g) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      calculateSpies[node.id] = jest.spyOn(node as any, 'calculateFunction');
+function observeAll(graph: Graph) {
+  graph.act(() => {
+    for (const node of graph) {
+      node.addObserver(noopObserver);
     }
-  }
+  });
+}
 
-  function expectToHaveRecalculated(recalculatedIds: string[]) {
-    assert(!!calculateSpies);
-    expect(mapValues(calculateSpies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual(
-      mapValues(calculateSpies, (_value, id) => (recalculatedIds.includes(id) ? 1 : 0)),
-    );
-  }
+let calculateSpies: Record<string, jest.SpyInstance> | undefined;
 
-  function observeAll(graph: Graph) {
-    graph.act(() => {
-      for (const node of graph) {
-        node.addObserver(noopObserver);
-      }
-    });
-  }
+beforeEach(() => {
+  calculateSpies = undefined;
+});
 
+// Allows us to see how many times each evaluate function was called
+function spyOnCalculates(g: Graph): void {
+  calculateSpies = {};
+  for (const node of g) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    calculateSpies[node.id] = jest.spyOn(node as any, 'calculateFunction');
+  }
+}
+
+function expectToHaveRecalculated(recalculatedIds: string[]) {
+  assert(!!calculateSpies);
+  expect(mapValues(calculateSpies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual(
+    mapValues(calculateSpies, (_value, id) => (recalculatedIds.includes(id) ? 1 : 0)),
+  );
+}
+
+describe('evaluation', () => {
   it('does first evaluation', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
@@ -71,7 +71,7 @@ describe('evaluation', () => {
     });
   });
 
-  it("first layer node's replacement causes downstream re-render", () => {
+  it("first layer node's replacement causes downstream recalculation", () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
     observeAll(graph);
@@ -100,7 +100,7 @@ describe('evaluation', () => {
     });
   });
 
-  it('replacement of two nodes in different layers causes downstream re-render', () => {
+  it('replacement of two nodes in different layers causes downstream recalculation', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
     observeAll(graph);
@@ -138,7 +138,7 @@ describe('evaluation', () => {
     });
   });
 
-  it('replacement of nodes in first and last layers causes downstream re-render', () => {
+  it('replacement of nodes in first and last layers causes downstream recalculation', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
     observeAll(graph);
@@ -224,47 +224,211 @@ describe('evaluation', () => {
     });
   });
 
-  it('Evaluates for medium acyclic', () => {
-    // Arrange
-    const graph = TestGraphs.makeMediumAcylic();
+  describe('cyclical graphs', () => {
+    it('evaluates for medium acyclic', () => {
+      // Arrange
+      const graph = TestGraphs.makeMediumAcylic();
 
-    // Act
-    observeAll(graph);
+      // Act
+      observeAll(graph);
 
-    // Assert
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-      c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-      d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
-      e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+        d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
+        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
+      });
+    });
+
+    it('evaluates non-cycle node in graph with cycle', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallSelfCycle();
+
+      // Act
+      observeAll(graph);
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.CicularDependencyError },
+        b: { status: NodeStatus.Resolved, value: 1 },
+      });
+    });
+
+    it('evaluates successfully after breaking a self-cycle', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallSelfCycle();
+      observeAll(graph);
+
+      // Act
+
+      graph.act(() => {
+        graph.getNode('a')?.replace([], () => 2);
+        spyOnCalculates(graph);
+      });
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: 2 },
+        b: { status: NodeStatus.Resolved, value: 1 },
+      });
+
+      expectToHaveRecalculated(['a']);
+    });
+
+    it('evaluates non-cycle nodes of medium 3-node cycle', () => {
+      // Arrange
+      const graph = TestGraphs.makeMedium3NodeCycle();
+
+      // Act
+      observeAll(graph);
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.CicularDependencyError },
+        b: { status: NodeStatus.CicularDependencyError },
+        c: { status: NodeStatus.CicularDependencyError },
+        d: { status: NodeStatus.Resolved, value: 5 },
+        e: { status: NodeStatus.Resolved, value: 1 },
+      });
+    });
+
+    it('evaluates after breaking a 3-node cycle', () => {
+      // Arrange
+      const graph = TestGraphs.makeMedium3NodeCycle();
+
+      // Act
+      observeAll(graph);
+
+      // Assert
+
+      graph.act(() => {
+        graph.getNode('a')?.replace([], () => 2);
+        spyOnCalculates(graph);
+      });
+
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: 2 },
+        b: { status: NodeStatus.Resolved, value: 1 },
+        c: { status: NodeStatus.Resolved, value: 3 },
+        d: { status: NodeStatus.Resolved, value: 5 },
+        e: { status: NodeStatus.Resolved, value: 1 },
+      });
+
+      expectToHaveRecalculated(['a', 'b', 'c']);
+    });
+
+    it('detects figure-eight cycle', () => {
+      // Arrange
+      const graph = TestGraphs.makeMediumFigureEightCycle();
+
+      // Act
+      observeAll(graph);
+
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.CicularDependencyError },
+        b: { status: NodeStatus.CicularDependencyError },
+        c: { status: NodeStatus.CicularDependencyError },
+        d: { status: NodeStatus.CicularDependencyError },
+        e: { status: NodeStatus.CicularDependencyError },
+      });
     });
   });
 
-  it('Evaluates non-cycle node in graph with cycle', () => {
+  describe('partial evaluation', () => {
+    it('nodes are unevaluated if unobserved', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallAcyclic();
+
+      // Assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Unevaluated },
+        b: { status: NodeStatus.Unevaluated },
+        c: { status: NodeStatus.Unevaluated },
+      });
+    });
+
+    it('only observed subgraph evaluated', () => {
+      // Arrange
+      const graph = TestGraphs.make3By3NuralNet();
+
+      // Act
+      graph.act(() => graph.getNode('g')?.addObserver(noopObserver));
+
+      // assert
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+        c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
+        d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
+        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.16) },
+        f: { status: NodeStatus.Unevaluated },
+        g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.17) },
+        h: { status: NodeStatus.Unevaluated },
+        i: { status: NodeStatus.Unevaluated },
+      });
+    });
+
+    it('only observed subgraph evaluated after observers removed', () => {
+      // Arrange
+      const graph = TestGraphs.make3By3NuralNet();
+
+      // Act
+      graph.act(() => {
+        graph.getNode('g')?.addObserver(noopObserver);
+        graph.getNode('i')?.addObserver(noopObserver);
+      });
+
+      graph.act(() => {
+        // I becomes unobserved
+        graph.getNode('i')?.removeObserver(noopObserver);
+        // Update first layer
+        graph.getNode('a')?.replace([], () => 0.3);
+        graph.getNode('b')?.replace([], () => 0.2);
+        graph.getNode('c')?.replace([], () => -0.1);
+        spyOnCalculates(graph);
+      });
+
+      // assert
+
+      // Only nodes that feed into G are recalculated
+      expectToHaveRecalculated(['a', 'b', 'c', 'd', 'e', 'g']);
+
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
+        b: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
+        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
+        d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.26) },
+        e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+        f: expect.anything(),
+        g: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.17) },
+        h: expect.anything(),
+        i: expect.anything(),
+      });
+    });
+  });
+});
+
+describe('act', () => {
+  it("nested acts don't trigger recalculation", () => {
     // Arrange
     const graph = TestGraphs.makeSmallSelfCycle();
 
     // Act
-    observeAll(graph);
-
-    // Assert
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.CicularDependencyError },
-      b: { status: NodeStatus.Resolved, value: 1 },
-    });
-  });
-
-  it('Evaluates successfully after breaking a self-cycle', () => {
-    // Arrange
-    const graph = TestGraphs.makeSmallSelfCycle();
-    observeAll(graph);
-
-    // Act
-
     graph.act(() => {
-      graph.getNode('a')?.replace([], () => 2);
-      spyOnCalculates(graph);
+      observeAll(graph);
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Unevaluated },
+        b: { status: NodeStatus.Unevaluated },
+      });
+      graph.act(() => {
+        graph.getNode('a')?.replace([], () => 2);
+      });
+      expectNodeStates(graph, {
+        a: { status: NodeStatus.Unevaluated },
+        b: { status: NodeStatus.Unevaluated },
+      });
     });
 
     // Assert
@@ -272,79 +436,19 @@ describe('evaluation', () => {
       a: { status: NodeStatus.Resolved, value: 2 },
       b: { status: NodeStatus.Resolved, value: 1 },
     });
-
-    expectToHaveRecalculated(['a']);
   });
 
-  it('Evaluates non-cycle nodes of medium 3-node cycle', () => {
+  it("empty acts don't cause any updates", () => {
     // Arrange
-    const graph = TestGraphs.makeMedium3NodeCycle();
+    const graph = TestGraphs.makeSmallSelfCycle();
+    graph.act(() => observeAll(graph));
 
     // Act
-    observeAll(graph);
+
+    spyOnCalculates(graph);
+    graph.act(() => {});
 
     // Assert
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.CicularDependencyError },
-      b: { status: NodeStatus.CicularDependencyError },
-      c: { status: NodeStatus.CicularDependencyError },
-      d: { status: NodeStatus.Resolved, value: 5 },
-      e: { status: NodeStatus.Resolved, value: 1 },
-    });
+    expectToHaveRecalculated([]);
   });
-
-  it('Evaluates after breaking a 3-node cycle', () => {
-    // Arrange
-    const graph = TestGraphs.makeMedium3NodeCycle();
-
-    // Act
-    observeAll(graph);
-
-    // Assert
-
-    graph.act(() => {
-      graph.getNode('a')?.replace([], () => 2);
-      spyOnCalculates(graph);
-    });
-
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.Resolved, value: 2 },
-      b: { status: NodeStatus.Resolved, value: 1 },
-      c: { status: NodeStatus.Resolved, value: 3 },
-      d: { status: NodeStatus.Resolved, value: 5 },
-      e: { status: NodeStatus.Resolved, value: 1 },
-    });
-
-    expectToHaveRecalculated(['a', 'b', 'c']);
-  });
-
-  it('Nodes are unevaluated if unobserved', () => {
-    // Arrange
-    const graph = TestGraphs.makeSmallAcyclic();
-
-    // Assert
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.Unevaluated },
-      b: { status: NodeStatus.Unevaluated },
-      c: { status: NodeStatus.Unevaluated },
-    });
-  });
-
-  it('Detects figure-eight cycle', () => {
-    // Arrange
-    const graph = TestGraphs.makeMediumFigureEightCycle();
-
-    // Act
-    observeAll(graph);
-
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.CicularDependencyError },
-      b: { status: NodeStatus.CicularDependencyError },
-      c: { status: NodeStatus.CicularDependencyError },
-      d: { status: NodeStatus.CicularDependencyError },
-      e: { status: NodeStatus.CicularDependencyError },
-    });
-  });
-
-  // TODO: add test for nested act()s
 });

@@ -9,5 +9,8 @@ export interface ReevaluationGraphState {
 }
 
 export interface Transaction {
+  /**
+   * Set of nodes whose state has changed during the transaction
+   */
   observedNodesChanged: Set<DataNode>;
 }
