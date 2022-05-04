@@ -41,4 +41,8 @@ type NodeState<TResult> =
 
 type Observer<TResult> = (result: TResult) => void;
 
-export { NodeStatus, NodeState, Observer };
+type CalculateFunction<TResult, TArgs extends unknown[]> =
+  | { sync: true; fn: (...args: TArgs) => TResult }
+  | { sync: false; fn: (...args: TArgs) => Promise<TResult> };
+
+export { NodeStatus, NodeState, Observer, CalculateFunction };

@@ -2,18 +2,26 @@ import assert from 'assert';
 import dfs from '../Graph/dfs';
 import Graph from '../Graph/Graph';
 import { shallowEquals } from '../utils';
-import { NodeState, NodeStatus, Observer } from './NodeTypes';
+import { CalculateFunction, NodeState, NodeStatus, Observer } from './NodeTypes';
 import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
-
-// TODO: add interfaces for public export
 
 interface EvaluationData<TResult> {
   dependencies: DataNode[];
   dependencyStates: NodeState<unknown>[];
+  /**
+   * Output of state after evaluation is run. Unlike DataNode.state, this is not cleared on invalidation
+   */
   state: NodeState<TResult>;
 }
 
 export type DataNodesOf<TArgs extends unknown[]> = { [Key in keyof TArgs]: DataNode<TArgs[Key]> };
+
+type EvaluationInfo<TResult> = {
+  depStates: NodeState<unknown>[];
+} & (
+  | { shouldEvaluate: false; nextState: NodeState<TResult> }
+  | { shouldEvaluate: true; depValues: unknown[] }
+);
 
 class DataNode<TResult = unknown> {
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
@@ -31,7 +39,7 @@ class DataNode<TResult = unknown> {
     public readonly graph: Graph,
     public readonly id: string,
     public dependencies: DataNode[],
-    private calculateFunction: (...args: unknown[]) => TResult,
+    private calculateFunction: CalculateFunction<TResult, unknown[]>,
   ) {}
 
   public addObserver(observer: Observer<TResult>): void {
@@ -62,8 +70,7 @@ class DataNode<TResult = unknown> {
   }
 
   /**
-   * Value has changed, e.g. for dependency-free data. Won't use cached
-   * value except for detecting unchanged evaluation
+   * Value has changed, e.g. for dependency-free data. Won't use cached value except for detecting unchanged evaluation
    */
   public invalidate(): void {
     this.assertNotDeleted();
@@ -73,9 +80,22 @@ class DataNode<TResult = unknown> {
 
   public replace<TArgs extends unknown[]>(
     dependencies: DataNodesOf<TArgs>,
-    calculate: (...args: TArgs) => TResult,
-  ): void;
-  public replace(dependencies: DataNode[], calculate: (...args: unknown[]) => TResult): void {
+    fn: (...args: TArgs) => TResult,
+  ): void {
+    this.replaceInner(dependencies, { fn, sync: true });
+  }
+
+  public replaceAsync<TArgs extends unknown[]>(
+    dependencies: DataNodesOf<TArgs>,
+    fn: (...args: TArgs) => Promise<TResult>,
+  ): void {
+    this.replaceInner(dependencies, { fn, sync: false });
+  }
+
+  private replaceInner<TArgs extends unknown[]>(
+    dependencies: DataNodesOf<TArgs>,
+    calculateFn: CalculateFunction<TResult, TArgs>,
+  ): void {
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.replace()');
 
@@ -110,74 +130,108 @@ class DataNode<TResult = unknown> {
       dep.dependents.add(this);
     }
 
-    this.calculateFunction = calculate;
+    this.calculateFunction = calculateFn as CalculateFunction<TResult, unknown[]>;
     this.invalidate();
+  }
+
+  private getEvaluationInfo(): EvaluationInfo<TResult> {
+    const depStates = this.dependencies.map((dep) => dep.state);
+
+    if (
+      this.lastEvaluation &&
+      this.state.status !== NodeStatus.Unevaluated &&
+      shallowEquals(this.dependencies, this.lastEvaluation.dependencies) &&
+      areArraysEqual(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
+    ) {
+      // Short circuit re-evaluation since dependencies are the same
+      return { depStates, shouldEvaluate: false, nextState: this.state };
+    }
+
+    const depValues: unknown[] = [];
+
+    // Build dependency values
+    for (const depState of depStates) {
+      // Is dependency in an errored state?
+
+      if (isErrorStatus(depState.status)) {
+        return {
+          depStates,
+          shouldEvaluate: false,
+          nextState: {
+            status: NodeStatus.DependencyError,
+          },
+        };
+      }
+
+      if (depState.status !== NodeStatus.Resolved) {
+        console.error('DataNode.evalate() called with dependency in unresolved state');
+        return {
+          depStates,
+          shouldEvaluate: false,
+          nextState: {
+            status: NodeStatus.InternalError,
+          },
+        };
+      }
+      depValues.push(depState.value);
+    }
+
+    return { depStates, shouldEvaluate: true, depValues };
+  }
+
+  private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): void {
+    this.state = newState;
+    this.lastEvaluation = {
+      dependencyStates: depStates,
+      dependencies: this.dependencies,
+      state: this.state,
+    };
+    if (!this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state)) {
+      // TODO: short circuit on different equality check (e.g. structural equality) provided
+      assert(this.graph.transaction);
+      // Notify listeners on observed node changed
+      this.graph.transaction.observedNodesChanged.add(this);
+    }
   }
 
   public evaluate(): void {
     this.assertNotDeleted();
+    assert(
+      this.calculateFunction.sync,
+      'DataNode.evaluate() must only be called for synchronous nodes',
+    );
 
-    const depStates = this.dependencies.map((dep) => dep.state);
+    const evaluationInfo = this.getEvaluationInfo();
+    const { depStates } = evaluationInfo;
+
+    if (!evaluationInfo.shouldEvaluate) {
+      this.commitEvaluation(evaluationInfo.nextState, depStates);
+      return;
+    }
+
+    let value: TResult;
     try {
-      if (this.lastEvaluation && this.state.status !== NodeStatus.Unevaluated) {
-        if (
-          shallowEquals(this.dependencies, this.lastEvaluation.dependencies) &&
-          areArraysEqual(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
-        ) {
-          // Short circuit re-evaluation since dependencies are the same
-          return;
-        }
-      }
+      // Calculate node
+      // ASYNC: add async
+      value = this.calculateFunction.fn(...evaluationInfo.depValues);
 
-      // Build dependency values
-      const dependencyValues: unknown[] = [];
-      for (const depState of depStates) {
-        // Is dependency in an errored state?
-
-        if (isErrorStatus(depState.status)) {
-          this.state = {
-            status: NodeStatus.DependencyError,
-          };
-          return;
-        }
-
-        if (depState.status !== NodeStatus.Resolved) {
-          console.error('DataNode.evalate() called with dependency in unresolved state');
-          this.state = {
-            status: NodeStatus.InternalError,
-          };
-          return;
-        }
-        dependencyValues.push(depState.value);
-      }
-
-      let value: TResult;
-      try {
-        // Calculate node
-        value = this.calculateFunction(...dependencyValues);
-      } catch (err) {
-        this.state = {
+      // ASYNC: Check for cancellation, don't update state if began a new run
+      this.commitEvaluation(
+        {
+          status: NodeStatus.Resolved,
+          value: value,
+        },
+        depStates,
+      );
+    } catch (err) {
+      this.commitEvaluation(
+        {
           status: NodeStatus.OwnError,
-        };
-        return;
-      }
+        },
+        depStates,
+      );
 
-      this.state = {
-        status: NodeStatus.Resolved,
-        value: value,
-      };
-    } finally {
-      // Check if state changed
-      if (!this.lastEvaluation || !areStatesEqual(this.state, this.lastEvaluation.state)) {
-        // TODO: short circuit on different equality check (e.g. structural equality) provided
-        this.graph.transaction?.observedNodesChanged.add(this);
-      }
-      // Ensure lastEvaluation is set on return
-      this.lastEvaluation = {
-        dependencyStates: depStates,
-        dependencies: this.dependencies,
-        state: this.state,
-      };
+      return;
     }
   }
 

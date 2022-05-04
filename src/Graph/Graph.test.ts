@@ -38,7 +38,7 @@ function spyOnCalculates(g: Graph): void {
   calculateSpies = {};
   for (const node of g) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    calculateSpies[node.id] = jest.spyOn(node as any, 'calculateFunction');
+    calculateSpies[node.id] = jest.spyOn((node as any).calculateFunction, 'fn');
   }
 }
 
@@ -517,3 +517,5 @@ describe('act', () => {
     expectToHaveRecalculated([]);
   });
 });
+
+// TODO: add tests for observer batching

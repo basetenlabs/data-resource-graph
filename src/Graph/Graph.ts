@@ -1,7 +1,7 @@
 import assert from 'assert';
 import { defaults } from 'lodash';
 import DataNode, { DataNodesOf } from '../DataNode/DataNode';
-import { NodeStatus } from '../DataNode/NodeTypes';
+import { CalculateFunction, NodeStatus } from '../DataNode/NodeTypes';
 import { takeFromSet } from '../utils';
 import dfs from './dfs';
 import { defaultOptions, GraphOptions } from './options';
@@ -19,7 +19,23 @@ class Graph implements Iterable<DataNode> {
   public addNode<TArgs extends unknown[], TResult>(
     id: string,
     dependencies: DataNodesOf<TArgs>,
-    calculate: (...args: TArgs) => TResult,
+    fn: (...args: TArgs) => TResult,
+  ): DataNode<TResult> {
+    return this.addNodeInner(id, dependencies, { fn, sync: true });
+  }
+
+  public addNodeAsync<TArgs extends unknown[], TResult>(
+    id: string,
+    dependencies: DataNodesOf<TArgs>,
+    fn: (...args: TArgs) => Promise<TResult>,
+  ): DataNode<TResult> {
+    return this.addNodeInner<TArgs, TResult>(id, dependencies, { fn, sync: false });
+  }
+
+  private addNodeInner<TArgs extends unknown[], TResult>(
+    id: string,
+    dependencies: DataNodesOf<TArgs>,
+    calculate: CalculateFunction<TResult, TArgs>,
   ): DataNode<TResult> {
     this.assertTransaction('Graph.addNode()');
 
@@ -31,7 +47,7 @@ class Graph implements Iterable<DataNode> {
       this,
       id,
       dependencies,
-      calculate as (...args: unknown[]) => TResult,
+      calculate as CalculateFunction<TResult, unknown[]>,
     );
 
     for (const dep of dependencies) {
@@ -113,14 +129,21 @@ class Graph implements Iterable<DataNode> {
     return reevaluationGraph;
   }
 
+  // ASYNC: add parallel? evaluate async
+  // Add hasAsync() to evaluate graph to see if sync evaluate can be called
   private evaluate(): void {
     const { ready, waiting } = this.makeReevaluationGraph();
 
     let readyNode: DataNode | undefined;
 
+    // ASYNC: run ready code in parallel, and call internal run() function on signal
+
     // eslint-disable-next-line no-cond-assign
     while ((readyNode = takeFromSet(ready))) {
+      // ASYNC: add conditional async
       readyNode.evaluate();
+
+      // ASYNC: check for staleness
 
       for (const dependent of readyNode.dependents) {
         const dependentCounter = waiting.get(dependent);
@@ -166,6 +189,7 @@ class Graph implements Iterable<DataNode> {
 
     const transaction = (this.transaction = { observedNodesChanged: new Set() });
 
+    // TODO: figure out control flow + error handling; move evaluate() out of try?
     try {
       callback();
 
