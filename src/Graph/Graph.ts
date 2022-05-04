@@ -2,15 +2,20 @@ import assert from 'assert';
 import { defaults } from 'lodash';
 import DataNode, { DataNodesOf } from '../DataNode/DataNode';
 import { CalculateFunction, NodeStatus } from '../DataNode/NodeTypes';
-import { takeFromSet } from '../utils';
+import { assertRunOnce, takeFromSet } from '../utils';
 import dfs from './dfs';
 import { defaultOptions, GraphOptions } from './options';
 import { ReevaluationGraphState, Transaction } from './types';
 
 class Graph implements Iterable<DataNode> {
-  private nodes: Map<string, DataNode> = new Map();
-  public transaction: Transaction | undefined;
+  private readonly nodes: Map<string, DataNode> = new Map();
   private readonly options: GraphOptions;
+
+  public transaction: Transaction | undefined;
+  // Incrementing counter corresponding to most recent transaction
+  public transactionId = 0;
+  // Set of nodes that still needed to be evaluated in most recent transaction
+  private nodesPendingExecution = new Set<DataNode>();
 
   constructor(options: Partial<GraphOptions> = {}) {
     this.options = defaults(defaultOptions, options);
@@ -71,13 +76,14 @@ class Graph implements Iterable<DataNode> {
     const unevaluated = new Set<DataNode>();
     const observedSet = new Set<DataNode>();
 
-    // Traverse observed subgraph looking for unevaluated deps and cycles
-    // Future optimization: whether or not each node is directly or indirectly observed can be cached
+    // Traverse observed subgraph looking for unevaluated nodes and detecting cycles
+    // TODO Future optimization: whether or not each node is directly or indirectly observed can be cached
     // based on the set of observed nodes and graph topology
     dfs(
       observed,
       (node, stack) => {
         observedSet.add(node);
+        // Look for cycles
         const priorNodeIndex = stack.indexOf(node);
         if (priorNodeIndex >= 0) {
           // Found cycle, set error on all cycle nodes
@@ -91,7 +97,11 @@ class Graph implements Iterable<DataNode> {
           return;
         }
 
+        // Check if node needs to be evaluated
         if (node.state.status === NodeStatus.Unevaluated) {
+          unevaluated.add(node);
+        } else if (this.nodesPendingExecution.has(node)) {
+          // Carry over nodes that were supposed to be executed last transaction but weren't
           unevaluated.add(node);
         }
       },
@@ -129,10 +139,11 @@ class Graph implements Iterable<DataNode> {
     return reevaluationGraph;
   }
 
-  // ASYNC: add parallel? evaluate async
+  // ASYNC: add parallel evaluate async
+  // ASYNC: return TransactionInfo, namely a completion promise and a flag about whether transaction was cancelled
   // Add hasAsync() to evaluate graph to see if sync evaluate can be called
-  private evaluate(): void {
-    const { ready, waiting } = this.makeReevaluationGraph();
+  private evaluate({ ready, waiting }: ReevaluationGraphState): void {
+    // ASYNC: [...ready, ...waiting.keys()].forEach(node =>this.nodesPendingExecution.add(node));
 
     let readyNode: DataNode | undefined;
 
@@ -160,6 +171,8 @@ class Graph implements Iterable<DataNode> {
     }
 
     assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
+    // Finished executing
+    this.nodesPendingExecution.clear();
   }
 
   getNode(id: string): DataNode | undefined {
@@ -179,6 +192,7 @@ class Graph implements Iterable<DataNode> {
 
   /**
    * Run mutations inside an action
+   * @returns TransactionResult, only for outermost act() call
    */
   public act(callback: () => void): void {
     if (this.transaction) {
@@ -187,22 +201,28 @@ class Graph implements Iterable<DataNode> {
       return;
     }
 
-    const transaction = (this.transaction = { observedNodesChanged: new Set() });
+    const transaction = (this.transaction = { notificationQueue: new Set() });
+    this.transactionId++;
 
     // TODO: figure out control flow + error handling; move evaluate() out of try?
     try {
       callback();
-
-      this.evaluate();
-    } finally {
-      this.options.observationBatcher(() => {
-        for (const node of transaction.observedNodesChanged) {
-          node.notifyObservers();
-        }
-      });
-
+    } catch (err) {
       this.transaction = undefined;
+      throw err;
     }
+
+    const reevaluationGraph = this.makeReevaluationGraph();
+
+    this.evaluate(reevaluationGraph);
+
+    assertRunOnce(this.options.observationBatcher)(() => {
+      for (const node of transaction.notificationQueue) {
+        node.notifyObservers();
+      }
+    });
+
+    this.transaction = undefined;
   }
   //#endregion transaction support
 }

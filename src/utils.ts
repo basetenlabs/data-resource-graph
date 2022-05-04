@@ -1,4 +1,6 @@
+import assert from 'assert';
 import isNil from 'lodash/isNil';
+import { BatchFunction } from './Graph/options';
 
 export function takeFromSet<T>(set: Set<T>): T | undefined {
   for (const el of set) {
@@ -33,3 +35,14 @@ export function assertDefined<T>(val: T | null | undefined): T {
 
   return val;
 }
+
+export const assertRunOnce =
+  (batcher: BatchFunction): BatchFunction =>
+  (callback: () => void) => {
+    let wasRunTimes = 0;
+    batcher(() => {
+      wasRunTimes++;
+      callback();
+    });
+    assert(wasRunTimes === 1, 'Expected batcher to run callback exactly 1 time');
+  };

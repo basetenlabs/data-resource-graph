@@ -1,4 +1,4 @@
-type BatchFunction = (callback: () => void) => void;
+export type BatchFunction = (callback: () => void) => void;
 
 export interface GraphOptions {
   observationBatcher: BatchFunction;

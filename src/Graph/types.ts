@@ -12,5 +12,14 @@ export interface Transaction {
   /**
    * Set of nodes whose state has changed during the transaction
    */
-  observedNodesChanged: Set<DataNode>;
+  notificationQueue: Set<DataNode>;
 }
+
+export type TransactionResult =
+  | {
+      sync: true;
+    }
+  | {
+      sync: false;
+      completion: Promise<{ wasCancelled: boolean }>;
+    };

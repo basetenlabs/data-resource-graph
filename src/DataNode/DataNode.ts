@@ -190,7 +190,7 @@ class DataNode<TResult = unknown> {
       // TODO: short circuit on different equality check (e.g. structural equality) provided
       assert(this.graph.transaction);
       // Notify listeners on observed node changed
-      this.graph.transaction.observedNodesChanged.add(this);
+      this.graph.transaction.notificationQueue.add(this);
     }
   }
 
@@ -209,11 +209,10 @@ class DataNode<TResult = unknown> {
       return;
     }
 
-    let value: TResult;
     try {
       // Calculate node
       // ASYNC: add async
-      value = this.calculateFunction.fn(...evaluationInfo.depValues);
+      const value = this.calculateFunction.fn(...evaluationInfo.depValues);
 
       // ASYNC: Check for cancellation, don't update state if began a new run
       this.commitEvaluation(
@@ -230,8 +229,47 @@ class DataNode<TResult = unknown> {
         },
         depStates,
       );
+    }
+  }
 
+  public async evaluateAsync(): Promise<void> {
+    this.assertNotDeleted();
+
+    const evaluationInfo = this.getEvaluationInfo();
+    const { depStates } = evaluationInfo;
+
+    if (!evaluationInfo.shouldEvaluate) {
+      this.commitEvaluation(evaluationInfo.nextState, depStates);
       return;
+    }
+
+    const currentTransactionId = this.graph.transactionId;
+
+    try {
+      // Calculate node
+      const value = await this.calculateFunction.fn(...evaluationInfo.depValues);
+
+      if (currentTransactionId !== this.graph.transactionId) {
+        // Another evaluation has begin. Discard result
+        return;
+      }
+
+      this.commitEvaluation(
+        {
+          status: NodeStatus.Resolved,
+          value: value,
+        },
+        depStates,
+      );
+    } catch (err) {
+      if (currentTransactionId === this.graph.transactionId) {
+        this.commitEvaluation(
+          {
+            status: NodeStatus.OwnError,
+          },
+          depStates,
+        );
+      }
     }
   }
 
@@ -261,6 +299,10 @@ class DataNode<TResult = unknown> {
     if (this.isDeleted()) {
       throw new Error('Operation on deleted node');
     }
+  }
+
+  public isAsync(): boolean {
+    return !this.calculateFunction.sync;
   }
 }
 

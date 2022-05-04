@@ -518,4 +518,5 @@ describe('act', () => {
   });
 });
 
+// TODO: add assertions for observer being called
 // TODO: add tests for observer batching
