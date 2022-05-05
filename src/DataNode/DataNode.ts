@@ -179,22 +179,23 @@ class DataNode<TResult = unknown> {
     return { depStates, shouldEvaluate: true, depValues };
   }
 
-  private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): void {
+  /**
+   * @return Whether to notify observers
+   */
+  private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): boolean {
     this.state = newState;
     this.lastEvaluation = {
       dependencyStates: depStates,
       dependencies: this.dependencies,
       state: this.state,
     };
-    if (!this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state)) {
-      // TODO: short circuit on different equality check (e.g. structural equality) provided
-      assert(this.graph.transaction);
-      // Notify listeners on observed node changed
-      this.graph.transaction.notificationQueue.add(this);
-    }
+    return !this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state);
   }
 
-  public evaluate(): void {
+  /**
+   * @return Whether to notify observers
+   */
+  public evaluate(): boolean {
     this.assertNotDeleted();
     assert(
       this.calculateFunction.sync,
@@ -205,8 +206,7 @@ class DataNode<TResult = unknown> {
     const { depStates } = evaluationInfo;
 
     if (!evaluationInfo.shouldEvaluate) {
-      this.commitEvaluation(evaluationInfo.nextState, depStates);
-      return;
+      return this.commitEvaluation(evaluationInfo.nextState, depStates);
     }
 
     try {
@@ -215,7 +215,7 @@ class DataNode<TResult = unknown> {
       const value = this.calculateFunction.fn(...evaluationInfo.depValues);
 
       // ASYNC: Check for cancellation, don't update state if began a new run
-      this.commitEvaluation(
+      return this.commitEvaluation(
         {
           status: NodeStatus.Resolved,
           value: value,
@@ -223,7 +223,7 @@ class DataNode<TResult = unknown> {
         depStates,
       );
     } catch (err) {
-      this.commitEvaluation(
+      return this.commitEvaluation(
         {
           status: NodeStatus.OwnError,
         },
@@ -232,15 +232,14 @@ class DataNode<TResult = unknown> {
     }
   }
 
-  public async evaluateAsync(): Promise<void> {
+  public async evaluateAsync(): Promise<boolean> {
     this.assertNotDeleted();
 
     const evaluationInfo = this.getEvaluationInfo();
     const { depStates } = evaluationInfo;
 
     if (!evaluationInfo.shouldEvaluate) {
-      this.commitEvaluation(evaluationInfo.nextState, depStates);
-      return;
+      return this.commitEvaluation(evaluationInfo.nextState, depStates);
     }
 
     const currentTransactionId = this.graph.transactionId;
@@ -251,10 +250,10 @@ class DataNode<TResult = unknown> {
 
       if (currentTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
-        return;
+        return false;
       }
 
-      this.commitEvaluation(
+      return this.commitEvaluation(
         {
           status: NodeStatus.Resolved,
           value: value,
@@ -262,14 +261,16 @@ class DataNode<TResult = unknown> {
         depStates,
       );
     } catch (err) {
-      if (currentTransactionId === this.graph.transactionId) {
-        this.commitEvaluation(
-          {
-            status: NodeStatus.OwnError,
-          },
-          depStates,
-        );
+      if (currentTransactionId !== this.graph.transactionId) {
+        // Another evaluation has begin. Discard result
+        return false;
       }
+      return this.commitEvaluation(
+        {
+          status: NodeStatus.OwnError,
+        },
+        depStates,
+      );
     }
   }
 

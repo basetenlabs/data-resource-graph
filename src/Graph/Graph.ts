@@ -1,17 +1,17 @@
 import assert from 'assert';
-import { defaults } from 'lodash';
+import defaults from 'lodash/defaults';
 import DataNode, { DataNodesOf } from '../DataNode/DataNode';
 import { CalculateFunction, NodeStatus } from '../DataNode/NodeTypes';
-import { assertRunOnce, takeFromSet } from '../utils';
+import { assertRunOnce, DeferredPromise, someIterable, takeFromSet, takeFromSetIf } from '../utils';
 import dfs from './dfs';
 import { defaultOptions, GraphOptions } from './options';
-import { ReevaluationGraphState, Transaction } from './types';
+import { AsyncTransactionCompletion, ReevaluationGraphState, TransactionResult } from './types';
 
 class Graph implements Iterable<DataNode> {
   private readonly nodes: Map<string, DataNode> = new Map();
   private readonly options: GraphOptions;
 
-  public transaction: Transaction | undefined;
+  private isInMutationPhase = false;
   // Incrementing counter corresponding to most recent transaction
   public transactionId = 0;
   // Set of nodes that still needed to be evaluated in most recent transaction
@@ -139,22 +139,18 @@ class Graph implements Iterable<DataNode> {
     return reevaluationGraph;
   }
 
-  // ASYNC: add parallel evaluate async
-  // ASYNC: return TransactionInfo, namely a completion promise and a flag about whether transaction was cancelled
-  // Add hasAsync() to evaluate graph to see if sync evaluate can be called
   private evaluate({ ready, waiting }: ReevaluationGraphState): void {
-    // ASYNC: [...ready, ...waiting.keys()].forEach(node =>this.nodesPendingExecution.add(node));
-
     let readyNode: DataNode | undefined;
-
-    // ASYNC: run ready code in parallel, and call internal run() function on signal
+    const notificationQueue = new Set<DataNode>();
+    // Create a new empty set. It can remain empty since synchronous evaluation should never carry nodes over to future transactions
+    this.nodesPendingExecution = new Set<DataNode>();
 
     // eslint-disable-next-line no-cond-assign
     while ((readyNode = takeFromSet(ready))) {
-      // ASYNC: add conditional async
-      readyNode.evaluate();
-
-      // ASYNC: check for staleness
+      const shouldNotify = readyNode.evaluate();
+      if (shouldNotify) {
+        notificationQueue.add(readyNode);
+      }
 
       for (const dependent of readyNode.dependents) {
         const dependentCounter = waiting.get(dependent);
@@ -171,8 +167,112 @@ class Graph implements Iterable<DataNode> {
     }
 
     assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
-    // Finished executing
-    this.nodesPendingExecution.clear();
+
+    // Notify
+    assertRunOnce(this.options.observationBatcher)(() => {
+      for (const node of notificationQueue) {
+        node.notifyObservers();
+      }
+    });
+  }
+
+  private evaluateAsync({
+    ready,
+    waiting,
+  }: ReevaluationGraphState): Promise<AsyncTransactionCompletion> {
+    // Add ready and waiting nodes to new set of nodesPendingExecution
+    // Create a new object and capture it in the closure so we can safely delete nodes from it after async execution
+    // without fear of clobbering future transactions.
+    const nodesPendingExecution = (this.nodesPendingExecution = new Set<DataNode>([
+      ...ready.keys(),
+      ...waiting.keys(),
+    ]));
+
+    const completion = new DeferredPromise<AsyncTransactionCompletion>();
+
+    const notificationQueue = new Set<DataNode>();
+    const running = new Set<DataNode>();
+    const currentTransactionId = this.transactionId;
+
+    function signalDependents(node: DataNode) {
+      for (const dependent of node.dependents) {
+        const dependentCounter = waiting.get(dependent);
+        if (dependentCounter !== undefined) {
+          if (dependentCounter === 1) {
+            waiting.delete(dependent);
+            ready.add(dependent);
+          } else if (dependentCounter > 1) {
+            // Signal
+            waiting.set(dependent, dependentCounter - 1);
+          }
+        }
+      }
+    }
+
+    // We want to defer calling this in synchronous execution blocks  as long as possible to get as much batching as possible
+    const flushNotificationQueue = () => {
+      assertRunOnce(this.options.observationBatcher)(() => {
+        for (const node of notificationQueue) {
+          node.notifyObservers();
+        }
+      });
+      notificationQueue.clear();
+    };
+
+    const doWork = (): void => {
+      // Check for cancellation
+      if (currentTransactionId !== this.transactionId) {
+        flushNotificationQueue();
+        completion.resolve({ wasCancelled: true });
+        return;
+      }
+      // Check for completion
+      if (!ready.size && !running.size) {
+        assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
+        assert(!nodesPendingExecution.size, 'Found nodes pending execution after evaluation ended');
+        flushNotificationQueue();
+        completion.resolve({ wasCancelled: false });
+        return;
+      }
+      // Evaluate all synchronous ready nodes
+      let readyNode: DataNode | undefined;
+
+      while ((readyNode = takeFromSetIf(ready, (node) => !node.isAsync()))) {
+        const shouldNotify = readyNode.evaluate();
+        nodesPendingExecution.delete(readyNode);
+        if (shouldNotify) notificationQueue.add(readyNode);
+        signalDependents(readyNode);
+      }
+
+      console.log('foo');
+
+      // Flush notification queue
+      flushNotificationQueue();
+
+      // ALL THE CODE ABOVE IN THIS POINT MUST RUN SYNCHRONOUSLY
+
+      // At this point, all remaining ready nodes are async
+      while (ready.size) {
+        const node = takeFromSet(ready);
+        node?.evaluateAsync().then(
+          (shouldNotify) => {
+            nodesPendingExecution.delete(node);
+            if (shouldNotify) notificationQueue.add(node);
+            signalDependents(node);
+            // Run work loop again
+            doWork();
+          },
+          (err) => {
+            // TODO: better error handling
+            console.error(err);
+          },
+        );
+      }
+    };
+
+    doWork();
+
+    return completion;
   }
 
   getNode(id: string): DataNode | undefined {
@@ -185,7 +285,7 @@ class Graph implements Iterable<DataNode> {
 
   //#region transaction support
   public assertTransaction(name = 'method'): void {
-    if (!this.transaction) {
+    if (!this.isInMutationPhase) {
       throw new Error(`${name} must be called inside a transaction`);
     }
   }
@@ -194,35 +294,41 @@ class Graph implements Iterable<DataNode> {
    * Run mutations inside an action
    * @returns TransactionResult, only for outermost act() call
    */
-  public act(callback: () => void): void {
-    if (this.transaction) {
+  public act(mutator: () => void): TransactionResult | undefined {
+    if (this.isInMutationPhase) {
       // If already inside a transaction, can just call callback
-      callback();
-      return;
+      mutator();
+      return undefined;
     }
 
-    const transaction = (this.transaction = { notificationQueue: new Set() });
+    this.isInMutationPhase = true;
     this.transactionId++;
 
-    // TODO: figure out control flow + error handling; move evaluate() out of try?
     try {
-      callback();
+      mutator();
     } catch (err) {
-      this.transaction = undefined;
+      this.isInMutationPhase = false;
       throw err;
     }
 
     const reevaluationGraph = this.makeReevaluationGraph();
 
-    this.evaluate(reevaluationGraph);
+    const hasAsyncReevaluation =
+      someIterable(reevaluationGraph.ready.keys(), (node) => node.isAsync()) ||
+      someIterable(reevaluationGraph.waiting.keys(), (node) => node.isAsync());
 
-    assertRunOnce(this.options.observationBatcher)(() => {
-      for (const node of transaction.notificationQueue) {
-        node.notifyObservers();
-      }
-    });
+    if (hasAsyncReevaluation) {
+      // Async evaluation
 
-    this.transaction = undefined;
+      return { sync: false, completion: this.evaluateAsync(reevaluationGraph) };
+    } else {
+      // Sync evaluation
+      this.evaluate(reevaluationGraph);
+
+      this.isInMutationPhase = false;
+
+      return { sync: true };
+    }
   }
   //#endregion transaction support
 }

@@ -11,6 +11,17 @@ export function takeFromSet<T>(set: Set<T>): T | undefined {
   return undefined;
 }
 
+export function takeFromSetIf<T>(set: Set<T>, predicate: (el: T) => boolean): T | undefined {
+  for (const el of set) {
+    if (predicate(el)) {
+      set.delete(el);
+      return el;
+    }
+  }
+
+  return undefined;
+}
+
 export function shallowEquals<T>(arr1: T[], arr2: T[]): boolean {
   if (arr1 === arr2) return true;
 
@@ -46,3 +57,31 @@ export const assertRunOnce =
     });
     assert(wasRunTimes === 1, 'Expected batcher to run callback exactly 1 time');
   };
+
+export function someIterable<T>(iterable: Iterable<T>, predicate: (t: T) => boolean): boolean {
+  for (const t of iterable) {
+    if (predicate(t)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Simple wrapper on promise allowing resolution and rejection from outside the object
+ */
+export class DeferredPromise<T> extends Promise<T> {
+  public reject!: (err?: unknown) => void;
+  public resolve!: (value: T) => void;
+
+  constructor() {
+    let resolve: any;
+    let reject: any;
+    super((resolve1, reject1) => {
+      resolve = resolve1;
+      reject = reject1;
+    });
+
+    this.resolve = resolve;
+    this.reject = reject;
+  }
+}

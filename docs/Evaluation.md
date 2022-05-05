@@ -15,7 +15,7 @@ In synchronous evaluation, both the **mutation phase** and **processing phase** 
 
 Asynchronous evaluation is a bit more complicated both because node change and notification happens in a separate execution block from `act()`, and because a node may not be done executing or may not ever run before the next transaction takes place.
 
-The graph promises **eventual correctness**, meaning that after all pending computations are done, all observed node states have the correct values no matter what path, or sequence of transactions, the graph took to get to its state.
+The graph promises **eventual correctness**, meaning that after all pending computations are done, all observed node states have the correct values no matter what path, or sequence of transactions, the graph took to get to its state. All observers are also always notified eventually.
 
 The processing phase takes place asynchronously for async evaluation. Synchronous nodes are still run synchronously if possible during an async evaluation, and async nodes may be run in parallel when they don't depend on each other.
 
