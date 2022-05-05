@@ -1,4 +1,3 @@
-import { defaults } from 'lodash';
 import DataNode from '../DataNode/DataNode';
 import Graph from '../Graph/Graph';
 
@@ -7,7 +6,11 @@ export type GraphBuilder<TValue> = {
     id: string,
     deps: string[],
     calculateFn?: (...args: TValue[]) => TValue,
-    partialOptions?: Partial<NodeOptions>,
+  ): GraphBuilder<TValue>;
+  addNodeAsync(
+    id: string,
+    deps: string[],
+    calculateFn?: (...args: TValue[]) => Promise<TValue>,
   ): GraphBuilder<TValue>;
   act(callback: (graphBuilder: GraphBuilder<TValue>) => void): GraphBuilder<TValue>;
   graph: Graph;
@@ -21,10 +24,6 @@ export type NodeOptions = {
 };
 
 const noop = () => {};
-
-const defaultOptions: NodeOptions = {
-  isObserved: false,
-};
 
 /**
  * Utility for building declarative, as opposed to constructive, graphs
@@ -45,9 +44,7 @@ export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphB
 
   const graphBuilder: GraphBuilder<TValue> = {
     graph,
-    addNode(id, deps, calculateFn = () => defaultNodeValue, partialOptions = {}) {
-      const options: NodeOptions = defaults(partialOptions, defaultOptions);
-
+    addNode(id, deps, calculateFn = () => defaultNodeValue) {
       const depNodes = deps.map(ensureNode);
 
       let node = graph.getNode(id);
@@ -57,7 +54,17 @@ export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphB
         node = graph.addNode<TValue[], TValue>(id, depNodes, calculateFn);
       }
 
-      if (options.isObserved) node.addObserver(noop);
+      return graphBuilder;
+    },
+    addNodeAsync(id, deps, calculateFn = () => Promise.resolve(defaultNodeValue)) {
+      const depNodes = deps.map(ensureNode);
+
+      let node = graph.getNode(id);
+      if (node) {
+        node.replaceWithAsync<TValue[]>(depNodes as DataNode<TValue>[], calculateFn);
+      } else {
+        node = graph.addAsyncNode<TValue[], TValue>(id, depNodes, calculateFn);
+      }
 
       return graphBuilder;
     },

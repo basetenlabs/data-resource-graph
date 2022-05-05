@@ -71,8 +71,10 @@ class Graph implements Iterable<DataNode> {
     this.nodes.delete(node.id);
   }
 
+  //#region evaluation
+
   private makeReevaluationGraph(): ReevaluationGraphState {
-    const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
+    const observed = Array.from(this).filter((node) => node.hasObserver());
 
     const unevaluated = new Set<DataNode>();
     const observedSet = new Set<DataNode>();
@@ -140,7 +142,7 @@ class Graph implements Iterable<DataNode> {
     return reevaluationGraph;
   }
 
-  private evaluate({ ready, waiting }: ReevaluationGraphState): void {
+  private evaluateSync({ ready, waiting }: ReevaluationGraphState): void {
     let readyNode: DataNode | undefined;
     const notificationQueue = new Set<DataNode>();
     // Create a new empty set. It can remain empty since synchronous evaluation should never carry nodes over to future transactions
@@ -170,13 +172,16 @@ class Graph implements Iterable<DataNode> {
     assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
 
     // Notify
-    assertRunOnce(this.options.observationBatcher)(() => {
-      for (const node of notificationQueue) {
-        node.notifyObservers();
-      }
-    });
+    if (notificationQueue.size) {
+      assertRunOnce(this.options.observationBatcher)(() => {
+        for (const node of notificationQueue) {
+          node.notifyObservers();
+        }
+      });
+    }
   }
 
+  // TODO: pull out to helper class - Evaluation
   private evaluateAsync({
     ready,
     waiting,
@@ -212,12 +217,14 @@ class Graph implements Iterable<DataNode> {
 
     // We want to defer calling this in synchronous execution blocks  as long as possible to get as much batching as possible
     const flushNotificationQueue = () => {
-      assertRunOnce(this.options.observationBatcher)(() => {
-        for (const node of notificationQueue) {
-          node.notifyObservers();
-        }
-      });
-      notificationQueue.clear();
+      if (notificationQueue.size) {
+        assertRunOnce(this.options.observationBatcher)(() => {
+          for (const node of notificationQueue) {
+            node.notifyObservers();
+          }
+        });
+        notificationQueue.clear();
+      }
     };
 
     const doWork = (): void => {
@@ -254,8 +261,10 @@ class Graph implements Iterable<DataNode> {
         // At this point, all remaining ready nodes are async
         while ((readyNode = takeFromSet(ready))) {
           const node = readyNode;
+          running.add(node);
           node.evaluateAsync().then(
             (shouldNotify) => {
+              running.delete(node);
               nodesPendingExecution.delete(node);
               if (shouldNotify) notificationQueue.add(node);
               signalDependents(node);
@@ -268,8 +277,13 @@ class Graph implements Iterable<DataNode> {
             },
           );
         }
-      } else {
-        doWork();
+      } else if (!ready.size && !running.size) {
+        // TODO: reduce duplication with Evaluation class
+        assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
+        assert(!nodesPendingExecution.size, 'Found nodes pending execution after evaluation ended');
+        flushNotificationQueue();
+        completionDeferred.resolve({ wasCancelled: false });
+        return;
       }
     };
 
@@ -277,6 +291,8 @@ class Graph implements Iterable<DataNode> {
 
     return completionDeferred.promise;
   }
+
+  //#endregion evaluation
 
   getNode(id: string): DataNode | undefined {
     return this.nodes.get(id);
@@ -326,7 +342,7 @@ class Graph implements Iterable<DataNode> {
       return { sync: false, completion: this.evaluateAsync(reevaluationGraph) };
     } else {
       // Sync evaluation
-      this.evaluate(reevaluationGraph);
+      this.evaluateSync(reevaluationGraph);
 
       this.isInMutationPhase = false;
 

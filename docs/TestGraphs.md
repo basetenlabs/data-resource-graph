@@ -29,6 +29,16 @@ flowchart LR
   c(c)
 ```
 
+## SmallChain
+```mermaid
+flowchart LR
+  a(a)
+  a --> b
+  b(b)
+  b --> c
+  c(c)
+```
+
 ## MediumAcylic
 ```mermaid
 flowchart LR

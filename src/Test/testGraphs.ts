@@ -11,6 +11,14 @@ const testGraphs = {
       builder.addNode('a', []).addNode('b', ['a']).addNode('c', ['a']),
     ).graph,
 
+  makeSmallChain: () =>
+    graphBuilder(0).act((builder) =>
+      builder
+        .addNode('a', [], () => 1)
+        .addNode('b', ['a'], (a) => 2 * a + 3)
+        .addNode('c', ['b'], (b) => 4 * b - 5),
+    ).graph,
+
   makeMediumAcylic: () =>
     graphBuilder(0).act((builder) =>
       builder
@@ -50,7 +58,7 @@ const testGraphs = {
         .addNode('b', ['a', 'c'])
         .addNode('d', ['c', 'g'])
         .addNode('e', ['b', 'd'])
-        .addNode('f', ['b'], undefined, { isObserved: false }),
+        .addNode('f', ['b'], undefined),
     ).graph,
 
   make3By3NuralNet: () =>

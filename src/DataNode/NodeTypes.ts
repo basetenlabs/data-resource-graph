@@ -39,7 +39,7 @@ type NodeState<TResult> =
       value: TResult;
     };
 
-type Observer<TResult> = (result: TResult) => void;
+type Observer<TResult> = (state: NodeState<TResult>) => void;
 
 type CalculateFunction<TResult, TArgs extends unknown[]> =
   | { sync: true; fn: (...args: TArgs) => TResult }

@@ -42,6 +42,7 @@ class DataNode<TResult = unknown> {
     private calculateFunction: CalculateFunction<TResult, unknown[]>,
   ) {}
 
+  //#region observers
   public addObserver(observer: Observer<TResult>): void {
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.addObserver()');
@@ -68,6 +69,7 @@ class DataNode<TResult = unknown> {
       observer(this.state);
     }
   }
+  //#endregion observers
 
   /**
    * Value has changed, e.g. for dependency-free data. Won't use cached value except for detecting unchanged evaluation
@@ -184,12 +186,15 @@ class DataNode<TResult = unknown> {
    */
   private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): boolean {
     this.state = newState;
+    const shouldNotify =
+      (!this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state)) &&
+      this.hasObserver();
     this.lastEvaluation = {
       dependencyStates: depStates,
       dependencies: this.dependencies,
       state: this.state,
     };
-    return !this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state);
+    return shouldNotify;
   }
 
   /**
@@ -211,10 +216,8 @@ class DataNode<TResult = unknown> {
 
     try {
       // Calculate node
-      // ASYNC: add async
       const value = this.calculateFunction.fn(...evaluationInfo.depValues);
 
-      // ASYNC: Check for cancellation, don't update state if began a new run
       return this.commitEvaluation(
         {
           status: NodeStatus.Resolved,
@@ -232,6 +235,9 @@ class DataNode<TResult = unknown> {
     }
   }
 
+  /**
+   * @return Whether to notify observers
+   */
   public async evaluateAsync(): Promise<boolean> {
     this.assertNotDeleted();
 

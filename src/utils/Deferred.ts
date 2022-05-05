@@ -2,8 +2,8 @@
  * Simple wrapper on promise allowing resolution and rejection from outside the object
  */
 export class Deferred<T> {
-  public _reject!: (err?: unknown) => void;
-  public _resolve!: (value: T | PromiseLike<T>) => void;
+  private _reject!: (err?: unknown) => void;
+  private _resolve!: (value: T | PromiseLike<T>) => void;
   private _isCompleted = false;
   public readonly promise: Promise<T>;
 

@@ -1,20 +1,16 @@
 import assert from 'assert';
-import fromPairs from 'lodash/fromPairs';
 import mapValues from 'lodash/mapValues';
 import DataNode from '../DataNode/DataNode';
 import { NodeState, NodeStatus } from '../DataNode/NodeTypes';
+import { graphBuilder } from '../Test/graphBuilder';
+import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
-import { noopObserver } from '../Test/testUtils';
+import { getNodeStates, noopObserver } from '../Test/testUtils';
+import { Deferred } from '../utils/Deferred';
 import { assertDefined } from '../utils/utils';
 import Graph from './Graph';
-import { TransactionResult } from './types';
-
-function getNodeStates(g: Graph): Record<string, NodeState<unknown>> {
-  return fromPairs(
-    Array.from(g).map((node): [string, NodeState<unknown>] => [node.id, node.state]),
-  );
-}
+import { AsyncTransactionCompletion, TransactionResult } from './types';
 
 function expectNodeStates(graph: Graph, expectedNodeStates: Record<string, NodeState<unknown>>) {
   expect(getNodeStates(graph)).toEqual(expectedNodeStates);
@@ -41,7 +37,8 @@ function spyOnCalculates(g: Graph): void {
   calculateSpies = {};
   for (const node of g) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    calculateSpies[node.id] = jest.spyOn((node as any).calculateFunction, 'fn');
+    const calculateFunction = (node as any).calculateFunction;
+    calculateSpies[node.id] = jest.spyOn(calculateFunction, 'fn');
   }
 }
 
@@ -50,6 +47,9 @@ function expectToHaveRecalculated(recalculatedIds: string[]) {
   expect(mapValues(calculateSpies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual(
     mapValues(calculateSpies, (_value, id) => (recalculatedIds.includes(id) ? 1 : 0)),
   );
+  for (const spy of Object.values(calculateSpies)) {
+    spy.mockClear();
+  }
 }
 
 describe('evaluation', () => {
@@ -64,6 +64,7 @@ describe('evaluation', () => {
 
     expect(transactionResult).toEqual(syncTransactionResult);
     expectNodeStates(graph, {
+      // TODO: use integers
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
       b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
       c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
@@ -189,17 +190,7 @@ describe('evaluation', () => {
     });
 
     // Assert
-    expect(mapValues(calculateSpies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
-      a: 0,
-      b: 0,
-      c: 1,
-      d: 0,
-      e: 0,
-      f: 0,
-      g: 0,
-      h: 0,
-      i: 0,
-    });
+    expectToHaveRecalculated(['c']);
   });
 
   it('propagates evaluation errors', () => {
@@ -415,27 +406,125 @@ describe('evaluation', () => {
   });
 
   describe('async', () => {
-    it('medium acyclic with async intermediary', async () => {
-      const graph = TestGraphs.makeMediumAcylic();
+    function getCompletion(
+      result: TransactionResult | undefined,
+    ): Promise<AsyncTransactionCompletion> {
+      assert(result?.sync === false);
 
-      const d = assertDefined(graph.getNode('d'));
+      return result.completion;
+    }
 
-      const transactionResult = graph.act(() => {
-        observeAll(graph);
-        d.replaceWithAsync(d.dependencies as [DataNode<number>], async (b) => 0.2 * b);
-      });
+    async function tick() {
+      // Takes two promise resolutions to complete continuation code within evaluation
+      await Promise.resolve();
+      await Promise.resolve();
+    }
 
-      assert(transactionResult?.sync === false);
+    it('single async node', async () => {
+      const deferredResultB = new Deferred<number>();
+      const graph = graphBuilder(0).act((builder) =>
+        builder
+          .addNode('a', [], () => 1)
+          .addNodeAsync('b', ['a'], (_a) => deferredResultB.promise)
+          .addNode('c', ['b'], (b) => 4 * b - 5),
+      ).graph;
 
-      await transactionResult.completion;
+      const graphTracker = new GraphTracker(graph);
 
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
-      });
+      // Observe all nodes
+      const completionPromise = getCompletion(graphTracker.observeAll());
+
+      // A evaluted immediately
+      graphTracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B, which resolves C
+      deferredResultB.resolve(3);
+
+      await tick();
+
+      // Their observers
+      graphTracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 3 }],
+        ['c', { status: NodeStatus.Resolved, value: 7 }],
+      ]);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
+    });
+
+    it('chained async', async () => {
+      const deferredResultA = new Deferred<number>();
+      const deferredResultB = new Deferred<number>();
+      const graph = graphBuilder(0).act((builder) =>
+        builder
+          .addNodeAsync('a', [], () => deferredResultA.promise)
+          .addNodeAsync('b', ['a'], (_a) => deferredResultB.promise)
+          .addNode('c', ['b'], (b) => 4 * b - 5),
+      ).graph;
+
+      const graphTracker = new GraphTracker(graph);
+
+      // Observe all nodes
+      const completionPromise = getCompletion(graphTracker.observeAll());
+
+      // Resolve A
+      deferredResultA.resolve(1);
+
+      await tick();
+
+      graphTracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B
+      deferredResultB.resolve(3);
+
+      await tick();
+
+      graphTracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 3 }],
+        ['c', { status: NodeStatus.Resolved, value: 7 }],
+      ]);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
+    });
+
+    it('parallel async', async () => {
+      const deferredResultA = new Deferred<number>();
+      const deferredResultB = new Deferred<number>();
+
+      const graph = graphBuilder(0).act((builder) =>
+        builder
+          .addNodeAsync('a', [], () => deferredResultA.promise)
+          .addNodeAsync('b', [], () => deferredResultB.promise)
+          .addNode('c', ['a', 'b'], (a, b) => a + b),
+      ).graph;
+
+      const graphTracker = new GraphTracker(graph);
+      spyOnCalculates(graph);
+
+      // Observe all nodes
+      const completionPromise = getCompletion(graphTracker.observeAll());
+
+      // a and b invoked immediately in parallel, but not resolved
+      expectToHaveRecalculated(['a', 'b']);
+
+      // Resolve A
+      deferredResultA.resolve(1);
+
+      await tick();
+
+      graphTracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B
+      deferredResultB.resolve(3);
+
+      await tick();
+
+      // B notified and c notified too synchronously
+      graphTracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 3 }],
+        ['c', { status: NodeStatus.Resolved, value: 4 }],
+      ]);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
     });
   });
 });
@@ -549,4 +638,5 @@ describe('act', () => {
 });
 
 // TODO: add assertions for observer being called
+// TOOD: add test for multiple observers
 // TODO: add tests for observer batching
