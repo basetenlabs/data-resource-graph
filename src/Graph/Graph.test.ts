@@ -6,8 +6,9 @@ import { NodeState, NodeStatus } from '../DataNode/NodeTypes';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
 import { noopObserver } from '../Test/testUtils';
-import { assertDefined } from '../utils';
+import { assertDefined } from '../utils/utils';
 import Graph from './Graph';
+import { TransactionResult } from './types';
 
 function getNodeStates(g: Graph): Record<string, NodeState<unknown>> {
   return fromPairs(
@@ -20,7 +21,7 @@ function expectNodeStates(graph: Graph, expectedNodeStates: Record<string, NodeS
 }
 
 function observeAll(graph: Graph) {
-  graph.act(() => {
+  return graph.act(() => {
     for (const node of graph) {
       node.addObserver(noopObserver);
     }
@@ -28,6 +29,8 @@ function observeAll(graph: Graph) {
 }
 
 let calculateSpies: Record<string, jest.SpyInstance> | undefined;
+
+const syncTransactionResult: TransactionResult = { sync: true };
 
 beforeEach(() => {
   calculateSpies = undefined;
@@ -55,9 +58,11 @@ describe('evaluation', () => {
     const graph = TestGraphs.make3By3NuralNet();
 
     // Act
-    observeAll(graph);
+    const transactionResult = observeAll(graph);
 
     // assert
+
+    expect(transactionResult).toEqual(syncTransactionResult);
     expectNodeStates(graph, {
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
       b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
@@ -409,68 +414,93 @@ describe('evaluation', () => {
     });
   });
 
-  describe('delete nodes', () => {
-    it('deletes middle node', () => {
-      // Arrange
+  describe('async', () => {
+    it('medium acyclic with async intermediary', async () => {
       const graph = TestGraphs.makeMediumAcylic();
-      observeAll(graph);
 
-      // Act
-      graph.act(() => {
-        graph.getNode('d')?.delete();
+      const d = assertDefined(graph.getNode('d'));
+
+      const transactionResult = graph.act(() => {
+        observeAll(graph);
+        d.replaceWithAsync(d.dependencies as [DataNode<number>], async (b) => 0.2 * b);
       });
 
-      // Assert
+      assert(transactionResult?.sync === false);
+
+      await transactionResult.completion;
+
       expectNodeStates(graph, {
         a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
         b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
         c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        e: { status: NodeStatus.DependencyError },
-      });
-    });
-
-    it('deletes leaf node', () => {
-      // Arrange
-      const graph = TestGraphs.makeMediumAcylic();
-      observeAll(graph);
-
-      // Act
-      graph.act(() => {
-        graph.getNode('c')?.delete();
-      });
-
-      // Assert
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
         d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
         e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
       });
     });
+  });
+});
 
-    it('recovers after node with missing dependency replaced', () => {
-      // Arrange
-      const graph = TestGraphs.makeMediumAcylic();
-      observeAll(graph);
+describe('delete nodes', () => {
+  it('deletes middle node', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    observeAll(graph);
 
-      // Act
-      graph.act(() => {
-        graph.getNode('d')?.delete();
-      });
+    // Act
+    graph.act(() => {
+      graph.getNode('d')?.delete();
+    });
 
-      graph.act(() => {
-        graph
-          .getNode('e')
-          ?.replace([assertDefined(graph.getNode('a') as DataNode<number>)], (a) => 0.2 * a);
-      });
+    // Assert
+    expectNodeStates(graph, {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+      c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+      e: { status: NodeStatus.DependencyError },
+    });
+  });
 
-      // Assert
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.08) },
-      });
+  it('deletes leaf node', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    observeAll(graph);
+
+    // Act
+    graph.act(() => {
+      graph.getNode('c')?.delete();
+    });
+
+    // Assert
+    expectNodeStates(graph, {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+      d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
+      e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
+    });
+  });
+
+  it('recovers after node with missing dependency replaced', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    observeAll(graph);
+
+    // Act
+    graph.act(() => {
+      graph.getNode('d')?.delete();
+    });
+
+    graph.act(() => {
+      graph
+        .getNode('e')
+        ?.replace([assertDefined(graph.getNode('a') as DataNode<number>)], (a) => 0.2 * a);
+    });
+
+    // Assert
+    expectNodeStates(graph, {
+      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
+      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
+      c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
+      e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.08) },
     });
   });
 });

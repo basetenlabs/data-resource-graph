@@ -1,6 +1,6 @@
 import assert from 'assert';
 import isNil from 'lodash/isNil';
-import { BatchFunction } from './Graph/options';
+import { BatchFunction } from '../Graph/options';
 
 export function takeFromSet<T>(set: Set<T>): T | undefined {
   for (const el of set) {
@@ -64,24 +64,4 @@ export function someIterable<T>(iterable: Iterable<T>, predicate: (t: T) => bool
   }
 
   return false;
-}
-
-/**
- * Simple wrapper on promise allowing resolution and rejection from outside the object
- */
-export class DeferredPromise<T> extends Promise<T> {
-  public reject!: (err?: unknown) => void;
-  public resolve!: (value: T) => void;
-
-  constructor() {
-    let resolve: any;
-    let reject: any;
-    super((resolve1, reject1) => {
-      resolve = resolve1;
-      reject = reject1;
-    });
-
-    this.resolve = resolve;
-    this.reject = reject;
-  }
 }

@@ -1,7 +1,7 @@
 import assert from 'assert';
 import dfs from '../Graph/dfs';
 import Graph from '../Graph/Graph';
-import { shallowEquals } from '../utils';
+import { shallowEquals } from '../utils/utils';
 import { CalculateFunction, NodeState, NodeStatus, Observer } from './NodeTypes';
 import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
 
@@ -85,7 +85,7 @@ class DataNode<TResult = unknown> {
     this.replaceInner(dependencies, { fn, sync: true });
   }
 
-  public replaceAsync<TArgs extends unknown[]>(
+  public replaceWithAsync<TArgs extends unknown[]>(
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => Promise<TResult>,
   ): void {

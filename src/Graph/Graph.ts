@@ -2,7 +2,8 @@ import assert from 'assert';
 import defaults from 'lodash/defaults';
 import DataNode, { DataNodesOf } from '../DataNode/DataNode';
 import { CalculateFunction, NodeStatus } from '../DataNode/NodeTypes';
-import { assertRunOnce, DeferredPromise, someIterable, takeFromSet, takeFromSetIf } from '../utils';
+import { Deferred } from '../utils/Deferred';
+import { assertRunOnce, someIterable, takeFromSet, takeFromSetIf } from '../utils/utils';
 import dfs from './dfs';
 import { defaultOptions, GraphOptions } from './options';
 import { AsyncTransactionCompletion, ReevaluationGraphState, TransactionResult } from './types';
@@ -29,7 +30,7 @@ class Graph implements Iterable<DataNode> {
     return this.addNodeInner(id, dependencies, { fn, sync: true });
   }
 
-  public addNodeAsync<TArgs extends unknown[], TResult>(
+  public addAsyncNode<TArgs extends unknown[], TResult>(
     id: string,
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => Promise<TResult>,
@@ -188,7 +189,7 @@ class Graph implements Iterable<DataNode> {
       ...waiting.keys(),
     ]));
 
-    const completion = new DeferredPromise<AsyncTransactionCompletion>();
+    const completionDeferred = new Deferred<AsyncTransactionCompletion>();
 
     const notificationQueue = new Set<DataNode>();
     const running = new Set<DataNode>();
@@ -223,7 +224,7 @@ class Graph implements Iterable<DataNode> {
       // Check for cancellation
       if (currentTransactionId !== this.transactionId) {
         flushNotificationQueue();
-        completion.resolve({ wasCancelled: true });
+        completionDeferred.resolve({ wasCancelled: true });
         return;
       }
       // Check for completion
@@ -231,7 +232,7 @@ class Graph implements Iterable<DataNode> {
         assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
         assert(!nodesPendingExecution.size, 'Found nodes pending execution after evaluation ended');
         flushNotificationQueue();
-        completion.resolve({ wasCancelled: false });
+        completionDeferred.resolve({ wasCancelled: false });
         return;
       }
       // Evaluate all synchronous ready nodes
@@ -244,35 +245,37 @@ class Graph implements Iterable<DataNode> {
         signalDependents(readyNode);
       }
 
-      console.log('foo');
-
       // Flush notification queue
       flushNotificationQueue();
 
       // ALL THE CODE ABOVE IN THIS POINT MUST RUN SYNCHRONOUSLY
 
-      // At this point, all remaining ready nodes are async
-      while (ready.size) {
-        const node = takeFromSet(ready);
-        node?.evaluateAsync().then(
-          (shouldNotify) => {
-            nodesPendingExecution.delete(node);
-            if (shouldNotify) notificationQueue.add(node);
-            signalDependents(node);
-            // Run work loop again
-            doWork();
-          },
-          (err) => {
-            // TODO: better error handling
-            console.error(err);
-          },
-        );
+      if (ready.size) {
+        // At this point, all remaining ready nodes are async
+        while ((readyNode = takeFromSet(ready))) {
+          const node = readyNode;
+          node.evaluateAsync().then(
+            (shouldNotify) => {
+              nodesPendingExecution.delete(node);
+              if (shouldNotify) notificationQueue.add(node);
+              signalDependents(node);
+              // Run work loop again
+              doWork();
+            },
+            (err) => {
+              // TODO: better error handling
+              console.error(err);
+            },
+          );
+        }
+      } else {
+        doWork();
       }
     };
 
     doWork();
 
-    return completion;
+    return completionDeferred.promise;
   }
 
   getNode(id: string): DataNode | undefined {

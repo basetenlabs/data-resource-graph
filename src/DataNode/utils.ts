@@ -1,4 +1,4 @@
-import { unreachable } from '../utils';
+import { unreachable } from '../utils/utils';
 import { NodeState, NodeStatus } from './NodeTypes';
 
 export function areStatesEqual<TResult>(
