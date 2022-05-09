@@ -33,15 +33,12 @@ class DataNode<TResult = unknown> {
    */
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
   private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public dependents = new Set<DataNode<any>>();
+  public dependents = new Set<DataNode>();
 
-  // Use any to avoid problems with assigning DataNode<X> to DataNode<unknown>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private observers: Observer<any>[] = [];
+  // Use unknown to avoid problems with assigning DataNode<X> to DataNode<unknown>
+  private observers: Observer<unknown>[] = [];
   // Observers which haven't received the latest value yet
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private pendingObservers = new Set<Observer<any>>();
+  private pendingObservers = new Set<Observer<unknown>>();
 
   readonly [Symbol.toStringTag] = `DataNode('${this.id}')`;
 
@@ -56,28 +53,41 @@ class DataNode<TResult = unknown> {
   ) {}
 
   //#region observers
+
   public addObserver(observer: Observer<TResult>): void {
+    // Need to cast to unknown
+    const unknownObserver = observer as Observer<unknown>;
+
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.addObserver()');
 
-    if (this.observers.includes(observer)) return;
-    this.observers.push(observer);
+    if (this.observers.includes(unknownObserver)) return;
+    this.observers.push(unknownObserver);
     // New observer needs to be notified in current transaction
-    this.pendingObservers.add(observer);
+    this.pendingObservers.add(unknownObserver);
   }
 
   public removeObserver(observer: Observer<TResult>): void {
+    const unknownObserver = observer as Observer<unknown>;
+
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.removeObserver()');
 
-    const index = this.observers.indexOf(observer);
+    const index = this.observers.indexOf(unknownObserver);
     if (index < 0) return;
     this.observers.splice(index, 1);
-    this.pendingObservers.delete(observer);
+    this.pendingObservers.delete(unknownObserver);
   }
 
   public hasObserver(): boolean {
     return this.observers.length > 0;
+  }
+
+  /**
+   * @internal
+   */
+  public hasPendingObservers(): boolean {
+    return !!this.pendingObservers.size;
   }
 
   public notifyObservers(): void {
@@ -91,6 +101,7 @@ class DataNode<TResult = unknown> {
     }
     this.pendingObservers.clear();
   }
+
   //#endregion observers
 
   /**
@@ -106,17 +117,17 @@ class DataNode<TResult = unknown> {
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => TResult,
   ): void {
-    this.replaceInner(dependencies, { fn, sync: true });
+    this.replaceInternal(dependencies, { fn, sync: true });
   }
 
   public replaceWithAsync<TArgs extends unknown[]>(
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => Promise<TResult>,
   ): void {
-    this.replaceInner(dependencies, { fn, sync: false });
+    this.replaceInternal(dependencies, { fn, sync: false });
   }
 
-  private replaceInner<TArgs extends unknown[]>(
+  private replaceInternal<TArgs extends unknown[]>(
     dependencies: DataNodesOf<TArgs>,
     calculateFn: CalculateFunction<TResult, TArgs>,
   ): void {
@@ -335,13 +346,6 @@ class DataNode<TResult = unknown> {
 
   public isAsync(): boolean {
     return !this.calculateFunction.sync;
-  }
-
-  /**
-   * @internal
-   */
-  public hasPendingObservers(): boolean {
-    return !!this.pendingObservers.size;
   }
 }
 
