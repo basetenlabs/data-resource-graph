@@ -3,6 +3,8 @@
 /lib/
 /dist/
 .idea/*
+/package/
+*.tgz
 
 .DS_Store
 coverage
