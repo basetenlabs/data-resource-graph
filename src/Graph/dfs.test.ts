@@ -1,8 +1,8 @@
-import assert from 'assert';
 import overArgs from 'lodash/overArgs';
-import DataNode from '../DataNode/DataNode';
+import DataNode from '../DataNode';
 import testGraphs from '../Test/testGraphs';
 import { mapNodesToIds } from '../Test/testUtils';
+import assert from '../utils/assert';
 import dfs from './dfs';
 
 let visitorSpy: jest.Mock<unknown, [node: string, stack: string[]]>;

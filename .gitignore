@@ -1,9 +1,11 @@
 /node_modules/
-/build/
+/es/
 /lib/
-/dist/
 .idea/*
+/package/
+*.tgz
 
 .DS_Store
 coverage
 *.log
+/types.d.ts

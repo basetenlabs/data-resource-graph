@@ -1,6 +1,6 @@
-import assert from 'assert';
-import DataNode from '../DataNode/DataNode';
-import { NodeStatus } from '../DataNode/NodeTypes';
+import DataNode from '../DataNode';
+import { NodeStatus } from '../DataNode/types';
+import assert from '../utils/assert';
 import { Deferred } from '../utils/Deferred';
 import { assertRunOnce, someIterable, takeFromSet, takeFromSetIf } from '../utils/utils';
 import dfs from './dfs';

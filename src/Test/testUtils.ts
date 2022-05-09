@@ -1,8 +1,7 @@
-import fromPairs from 'lodash/fromPairs';
 import mapValues from 'lodash/mapValues';
-import DataNode from '../DataNode/DataNode';
-import { NodeState } from '../DataNode/NodeTypes';
-import Graph from '../Graph/Graph';
+import DataNode from '../DataNode';
+import { NodeState } from '../DataNode/types';
+import Graph from '../Graph';
 
 /**
  * Deeply replaces node referenced with their IDs for simpler assertions
@@ -29,7 +28,7 @@ export function mapNodesToIds(val: unknown): unknown {
 export function noopObserver(): void {}
 
 export function getNodeStates(g: Graph): Record<string, NodeState<unknown>> {
-  return fromPairs(
+  return Object.fromEntries(
     Array.from(g).map((node): [string, NodeState<unknown>] => [node.id, node.state]),
   );
 }

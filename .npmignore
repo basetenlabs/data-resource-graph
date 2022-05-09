@@ -5,10 +5,17 @@
 /tmp/
 .idea/*
 /docs/
+.editorconfig
+.eslintrc.js
+.prettierrc.json
+.tool-versions
+api-extractor.json
+jest.config.js
+tsconfig.json
+/src/
 
 coverage
 *.log
-.gitlab-ci.yml
 
 package-lock.json
 /*.tgz

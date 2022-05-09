@@ -1,5 +1,5 @@
 import { unreachable } from '../utils/utils';
-import { NodeState, NodeStatus } from './NodeTypes';
+import { NodeState, NodeStatus } from './types';
 
 export function areStatesEqual<TResult>(
   state1: NodeState<TResult>,

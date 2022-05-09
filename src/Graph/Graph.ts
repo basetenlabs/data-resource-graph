@@ -1,22 +1,27 @@
-import defaults from 'lodash/defaults';
-import DataNode, { DataNodesOf } from '../DataNode/DataNode';
-import { CalculateFunction } from '../DataNode/NodeTypes';
+import DataNode from '../DataNode';
+import { CalculateFunction, DataNodesOf } from '../DataNode/types';
 import { GraphTransaction } from './GraphTransaction';
 import { defaultOptions, GraphOptions } from './options';
 import { TransactionResult } from './types';
 
+/**
+ * @public
+ */
 class Graph implements Iterable<DataNode> {
   private readonly nodes: Map<string, DataNode> = new Map();
   public readonly options: GraphOptions;
 
   private isInMutationPhase = false;
-  // Incrementing counter corresponding to most recent transaction
+  /**
+   * Incrementing counter corresponding to most recent transaction
+   * @internal
+   */
   public transactionId = 0;
-  // Set of nodes that still needed to be evaluated in most recent transaction
+
   private currentTransaction: GraphTransaction | undefined;
 
   constructor(options: Partial<GraphOptions> = {}) {
-    this.options = defaults(defaultOptions, options);
+    this.options = { ...defaultOptions, ...options };
   }
 
   public addNode<TArgs extends unknown[], TResult>(
@@ -24,7 +29,7 @@ class Graph implements Iterable<DataNode> {
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => TResult,
   ): DataNode<TResult> {
-    return this.addNodeInner(id, dependencies, { fn, sync: true });
+    return this.addNodeInternal(id, dependencies, { fn, sync: true });
   }
 
   public addAsyncNode<TArgs extends unknown[], TResult>(
@@ -32,10 +37,10 @@ class Graph implements Iterable<DataNode> {
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => Promise<TResult>,
   ): DataNode<TResult> {
-    return this.addNodeInner<TArgs, TResult>(id, dependencies, { fn, sync: false });
+    return this.addNodeInternal<TArgs, TResult>(id, dependencies, { fn, sync: false });
   }
 
-  private addNodeInner<TArgs extends unknown[], TResult>(
+  private addNodeInternal<TArgs extends unknown[], TResult>(
     id: string,
     dependencies: DataNodesOf<TArgs>,
     calculate: CalculateFunction<TResult, TArgs>,
@@ -62,6 +67,9 @@ class Graph implements Iterable<DataNode> {
     return newNode;
   }
 
+  /**
+   * @internal
+   */
   public deleteNodeInternal(node: DataNode): void {
     this.assertTransaction('Graph.deleteNode()');
 
@@ -77,6 +85,9 @@ class Graph implements Iterable<DataNode> {
   }
 
   //#region transaction support
+  /**
+   * @internal
+   */
   public assertTransaction(name = 'method'): void {
     if (!this.isInMutationPhase) {
       throw new Error(`${name} must be called inside a transaction`);

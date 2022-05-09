@@ -1,8 +1,8 @@
-import assert from 'assert';
+import Graph from '../Graph';
 import dfs from '../Graph/dfs';
-import Graph from '../Graph/Graph';
+import assert from '../utils/assert';
 import { shallowEquals } from '../utils/utils';
-import { CalculateFunction, NodeState, NodeStatus, Observer } from './NodeTypes';
+import { CalculateFunction, DataNodesOf, NodeState, NodeStatus, Observer } from './types';
 import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
 
 interface EvaluationData<TResult> {
@@ -14,8 +14,6 @@ interface EvaluationData<TResult> {
   state: NodeState<TResult>;
 }
 
-export type DataNodesOf<TArgs extends unknown[]> = { [Key in keyof TArgs]: DataNode<TArgs[Key]> };
-
 type EvaluationInfo<TResult> = {
   depStates: NodeState<unknown>[];
 } & (
@@ -23,7 +21,16 @@ type EvaluationInfo<TResult> = {
   | { shouldEvaluate: true; depValues: unknown[] }
 );
 
+/**
+ * A node in the data graph. Each DataNode has:
+ * - An array of dependencies on other nodes
+ * - A calculate function which takes in the values of its dependency nodes and returns its own value
+ * @public
+ */
 class DataNode<TResult = unknown> {
+  /**
+   * @internal - Access the node state by adding an observer
+   */
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
   private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,8 +40,11 @@ class DataNode<TResult = unknown> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private observers: Observer<any>[] = [];
 
-  [Symbol.toStringTag] = `DataNode('${this.id}')`;
+  readonly [Symbol.toStringTag] = `DataNode('${this.id}')`;
 
+  /**
+   * @internal - Use Graph.addNode()/Graph.addNodeAsync() to add new nodes
+   */
   constructor(
     public readonly graph: Graph,
     public readonly id: string,
@@ -72,7 +82,7 @@ class DataNode<TResult = unknown> {
   //#endregion observers
 
   /**
-   * Value has changed, e.g. for dependency-free data. Won't use cached value except for detecting unchanged evaluation
+   * Signal that the value has changed. The previously cached value won't be used except for detecting which dependent nodes to evaluate
    */
   public invalidate(): void {
     this.assertNotDeleted();
@@ -182,7 +192,7 @@ class DataNode<TResult = unknown> {
   }
 
   /**
-   * @return Whether to notify observers
+   * @returns Whether to notify observers
    */
   private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): boolean {
     this.state = newState;
@@ -198,7 +208,8 @@ class DataNode<TResult = unknown> {
   }
 
   /**
-   * @return Whether to notify observers
+   * @returns Whether to notify observers
+   * @internal
    */
   public evaluate(): boolean {
     this.assertNotDeleted();
@@ -236,7 +247,7 @@ class DataNode<TResult = unknown> {
   }
 
   /**
-   * @return Whether to notify observers
+   * @returns Whether to notify observers
    */
   public async evaluateAsync(): Promise<boolean> {
     this.assertNotDeleted();

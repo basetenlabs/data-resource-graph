@@ -1,20 +1,26 @@
-import DataNode from '../DataNode/DataNode';
-
-export interface ReevaluationGraphState {
-  ready: Set<DataNode>;
+/**
+ * @public
+ */
+export type AsyncTransactionCompletion = {
   /**
-   * Map of nodes with unfinished dependencies to the number of dependencies, like a semaphore
+   * Indicates whether the transaction was cancelled, meaning another transaction started while this transaction
+   * was still evaluating.
    */
-  waiting: Map<DataNode, number>;
-}
+  wasCancelled: boolean;
+};
 
-export type AsyncTransactionCompletion = { wasCancelled: boolean };
-
+/**
+ * Describes the execution that takes place after a transaction
+ * @public
+ */
 export type TransactionResult =
   | {
       sync: true;
     }
   | {
       sync: false;
+      /**
+       * Promise fulfilled when the graph's evaluation finished
+       */
       completion: Promise<AsyncTransactionCompletion>;
     };

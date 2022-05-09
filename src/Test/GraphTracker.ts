@@ -1,12 +1,12 @@
-import assert from 'assert';
 import fromPairs from 'lodash/fromPairs';
 import omitBy from 'lodash/omitBy';
-import DataNode from '../DataNode/DataNode';
-import { NodeState, Observer } from '../DataNode/NodeTypes';
+import DataNode from '../DataNode';
+import { NodeState, Observer } from '../DataNode/types';
 import { areStatesEqual } from '../DataNode/utils';
-import Graph from '../Graph/Graph';
+import Graph from '../Graph';
 import { BatchFunction } from '../Graph/options';
 import { TransactionResult } from '../Graph/types';
+import assert from '../utils/assert';
 import { assertDefined } from '../utils/utils';
 import { getNodeStates } from './testUtils';
 
