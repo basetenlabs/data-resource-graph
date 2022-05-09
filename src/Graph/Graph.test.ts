@@ -3,6 +3,7 @@ import { NodeStatus } from '../DataNode/types';
 import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
+import { noopObserver } from '../Test/testUtils';
 import assert from '../utils/assert';
 import { Deferred } from '../utils/Deferred';
 import { assertDefined } from '../utils/utils';
@@ -54,14 +55,14 @@ describe('evaluation', () => {
     // Assert
     tracker.expectToHaveCalculated(['c', 'e', 'f', 'g', 'h', 'i']);
 
-    tracker.expectNodeStateChanges({
-      c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
-      e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
-      f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.03) },
-      g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.206) },
-      h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.115) },
-      i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.021) },
-    });
+    tracker.expectObservationBatch([
+      ['c', { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) }],
+      ['e', { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) }],
+      ['f', { status: NodeStatus.Resolved, value: expect.closeTo2(-0.03) }],
+      ['g', { status: NodeStatus.Resolved, value: expect.closeTo2(0.206) }],
+      ['h', { status: NodeStatus.Resolved, value: expect.closeTo2(0.115) }],
+      ['i', { status: NodeStatus.Resolved, value: expect.closeTo2(-0.021) }],
+    ]);
   });
 
   it('replacement of two nodes in different layers causes downstream recalculation', () => {
@@ -737,6 +738,56 @@ describe('act', () => {
   });
 });
 
-// TODO: add assertions for observer being called
-// TOOD: add test for multiple observers
-// TODO: add tests for observer batching
+describe('observers', () => {
+  it('Calls first observer observer on previously observed node', () => {
+    const observer = jest.fn();
+
+    const graph = TestGraphs.makeSmallChain();
+    const nodeC = assertDefined(graph.getNode('c'));
+
+    graph.act(() => nodeC.addObserver(observer));
+    expect(observer.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+  });
+
+  it('Calls new observer on previously observed node', () => {
+    const newObserver = jest.fn();
+
+    const graph = TestGraphs.makeSmallChain();
+    const nodeC = assertDefined(graph.getNode('c'));
+
+    graph.act(() => nodeC.addObserver(noopObserver));
+
+    graph.act(() => nodeC.addObserver(newObserver));
+
+    expect(newObserver.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+  });
+
+  it('Calls observer on indirectly observed node', () => {
+    const observer = jest.fn();
+
+    const graph = TestGraphs.makeSmallChain();
+    const nodeC = assertDefined(graph.getNode('c'));
+    const nodeA = assertDefined(graph.getNode('a'));
+
+    graph.act(() => nodeC.addObserver(noopObserver));
+
+    graph.act(() => {
+      nodeA.addObserver(observer);
+    });
+
+    expect(observer.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 1 }]]);
+  });
+
+  it('Calls observer after removed and added back', () => {
+    const observer = jest.fn();
+
+    const graph = TestGraphs.makeSmallChain();
+    const nodeC = assertDefined(graph.getNode('c'));
+    graph.act(() => nodeC.addObserver(observer));
+    graph.act(() => nodeC.removeObserver(observer));
+    observer.mockClear();
+    graph.act(() => nodeC.addObserver(observer));
+
+    expect(observer.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+  });
+});

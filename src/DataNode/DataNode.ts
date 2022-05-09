@@ -39,6 +39,9 @@ class DataNode<TResult = unknown> {
   // Use any to avoid problems with assigning DataNode<X> to DataNode<unknown>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private observers: Observer<any>[] = [];
+  // Observers which haven't received the latest value yet
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private pendingObservers = new Set<Observer<any>>();
 
   readonly [Symbol.toStringTag] = `DataNode('${this.id}')`;
 
@@ -59,6 +62,8 @@ class DataNode<TResult = unknown> {
 
     if (this.observers.includes(observer)) return;
     this.observers.push(observer);
+    // New observer needs to be notified in current transaction
+    this.pendingObservers.add(observer);
   }
 
   public removeObserver(observer: Observer<TResult>): void {
@@ -68,6 +73,7 @@ class DataNode<TResult = unknown> {
     const index = this.observers.indexOf(observer);
     if (index < 0) return;
     this.observers.splice(index, 1);
+    this.pendingObservers.delete(observer);
   }
 
   public hasObserver(): boolean {
@@ -75,9 +81,15 @@ class DataNode<TResult = unknown> {
   }
 
   public notifyObservers(): void {
-    for (const observer of this.observers) {
-      observer(this.state);
+    for (const observer of this.pendingObservers) {
+      try {
+        observer(this.state);
+      } catch (err) {
+        // TODO: better error handling
+        console.error(err);
+      }
     }
+    this.pendingObservers.clear();
   }
   //#endregion observers
 
@@ -194,24 +206,26 @@ class DataNode<TResult = unknown> {
   /**
    * @returns Whether to notify observers
    */
-  private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): boolean {
+  private commitEvaluation(newState: NodeState<TResult>, depStates: NodeState<unknown>[]): void {
     this.state = newState;
-    const shouldNotify =
-      (!this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state)) &&
-      this.hasObserver();
+    if (!this.lastEvaluation || !areStatesEqual(newState, this.lastEvaluation.state)) {
+      // State has changed, so notify all observers
+      for (const observer of this.observers) {
+        this.pendingObservers.add(observer);
+      }
+    }
     this.lastEvaluation = {
       dependencyStates: depStates,
       dependencies: this.dependencies,
       state: this.state,
     };
-    return shouldNotify;
   }
 
   /**
    * @returns Whether to notify observers
    * @internal
    */
-  public evaluate(): boolean {
+  public evaluate(): void {
     this.assertNotDeleted();
     assert(
       this.calculateFunction.sync,
@@ -249,7 +263,7 @@ class DataNode<TResult = unknown> {
   /**
    * @returns Whether to notify observers
    */
-  public async evaluateAsync(): Promise<boolean> {
+  public async evaluateAsync(): Promise<void> {
     this.assertNotDeleted();
 
     const evaluationInfo = this.getEvaluationInfo();
@@ -267,7 +281,7 @@ class DataNode<TResult = unknown> {
 
       if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
-        return false;
+        return;
       }
 
       return this.commitEvaluation(
@@ -280,7 +294,7 @@ class DataNode<TResult = unknown> {
     } catch (err) {
       if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
-        return false;
+        return;
       }
       return this.commitEvaluation(
         {
@@ -321,6 +335,13 @@ class DataNode<TResult = unknown> {
 
   public isAsync(): boolean {
     return !this.calculateFunction.sync;
+  }
+
+  /**
+   * @internal
+   */
+  public hasPendingObservers(): boolean {
+    return !!this.pendingObservers.size;
   }
 }
 
