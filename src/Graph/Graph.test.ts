@@ -1,64 +1,30 @@
 import assert from 'assert';
-import fromPairs from 'lodash/fromPairs';
-import mapValues from 'lodash/mapValues';
 import DataNode from '../DataNode/DataNode';
-import { NodeState, NodeStatus } from '../DataNode/NodeTypes';
+import { NodeStatus } from '../DataNode/NodeTypes';
+import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
-import { noopObserver } from '../Test/testUtils';
-import { assertDefined } from '../utils';
+import { Deferred } from '../utils/Deferred';
+import { assertDefined } from '../utils/utils';
 import Graph from './Graph';
+import { AsyncTransactionCompletion, TransactionResult } from './types';
 
-function getNodeStates(g: Graph): Record<string, NodeState<unknown>> {
-  return fromPairs(
-    Array.from(g).map((node): [string, NodeState<unknown>] => [node.id, node.state]),
-  );
-}
-
-function expectNodeStates(graph: Graph, expectedNodeStates: Record<string, NodeState<unknown>>) {
-  expect(getNodeStates(graph)).toEqual(expectedNodeStates);
-}
-
-function observeAll(graph: Graph) {
-  graph.act(() => {
-    for (const node of graph) {
-      node.addObserver(noopObserver);
-    }
-  });
-}
-
-let calculateSpies: Record<string, jest.SpyInstance> | undefined;
-
-beforeEach(() => {
-  calculateSpies = undefined;
-});
-
-// Allows us to see how many times each evaluate function was called
-function spyOnCalculates(g: Graph): void {
-  calculateSpies = {};
-  for (const node of g) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    calculateSpies[node.id] = jest.spyOn(node as any, 'calculateFunction');
-  }
-}
-
-function expectToHaveRecalculated(recalculatedIds: string[]) {
-  assert(!!calculateSpies);
-  expect(mapValues(calculateSpies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual(
-    mapValues(calculateSpies, (_value, id) => (recalculatedIds.includes(id) ? 1 : 0)),
-  );
-}
+const syncTransactionResult: TransactionResult = { sync: true };
 
 describe('evaluation', () => {
   it('does first evaluation', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
+    const tracker = new GraphTracker(graph);
 
     // Act
-    observeAll(graph);
+    const transactionResult = tracker.observeAll();
 
-    // assert
-    expectNodeStates(graph, {
+    // Assert
+
+    expect(transactionResult).toEqual(syncTransactionResult);
+    tracker.expectNodeStateChanges({
+      // TODO: use integers
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
       b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
       c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
@@ -74,24 +40,22 @@ describe('evaluation', () => {
   it("first layer node's replacement causes downstream recalculation", () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    observeAll(graph);
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
 
     // Act
-
     graph.act(() => {
       // Replace value of c
       graph.getNode('c')?.replace([], () => 0.3);
-      spyOnCalculates(graph);
+      tracker.spyOnCalculates();
     });
 
     // Assert
-    expectToHaveRecalculated(['c', 'e', 'f', 'g', 'h', 'i']);
+    tracker.expectToHaveCalculated(['c', 'e', 'f', 'g', 'h', 'i']);
 
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
-      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+    tracker.expectNodeStateChanges({
       c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
-      d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
       e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
       f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.03) },
       g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.206) },
@@ -103,45 +67,42 @@ describe('evaluation', () => {
   it('replacement of two nodes in different layers causes downstream recalculation', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    observeAll(graph);
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
 
     // Act
 
     graph.act(() => {
       // Replace value of c
       graph.getNode('a')?.replace([], () => -0.4);
-      graph
-        .getNode('f')
-        ?.replace(
-          [
-            assertDefined(graph.getNode('b') as DataNode<number>),
-            assertDefined(graph.getNode('c') as DataNode<number>),
-          ],
-          (b: number, c: number) => 0.3 * b + 0.1 * c,
-        );
-      spyOnCalculates(graph);
+      const nodeF = assertDefined(graph.getNode('f'));
+
+      nodeF.replace(
+        nodeF.dependencies as [DataNode<number>, DataNode<number>],
+        (b: number, c: number) => 0.3 * b + 0.1 * c,
+      );
+      tracker.spyOnCalculates();
     });
 
     // Assert
-    expectToHaveRecalculated(['a', 'd', 'e', 'f', 'g', 'h', 'i']);
+    tracker.expectToHaveCalculated(['a', 'f', 'd', 'e', 'g', 'h', 'i']);
 
-    expectNodeStates(graph, {
+    tracker.expectNodeStateChanges({
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
-      c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
       d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.34) },
       e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.24) },
-      f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.05) },
       g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.25) },
       h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.145) },
-      i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.035) },
     });
   });
 
   it('replacement of nodes in first and last layers causes downstream recalculation', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    observeAll(graph);
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
 
     // Act
 
@@ -149,29 +110,26 @@ describe('evaluation', () => {
       // Replace value of c
       graph.getNode('a')?.replace([], () => -0.4);
       graph.getNode('i')?.invalidate();
-      spyOnCalculates(graph);
+      tracker.spyOnCalculates();
     });
 
     // Assert
-    expectToHaveRecalculated(['a', 'd', 'e', 'g', 'h', 'i']);
+    tracker.expectToHaveCalculated(['a', 'd', 'e', 'g', 'h', 'i']);
 
-    expectNodeStates(graph, {
+    tracker.expectNodeStateChanges({
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
-      c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
       d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.34) },
       e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.24) },
-      f: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.05) },
       g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.25) },
       h: { status: NodeStatus.Resolved, value: expect.closeTo2(0.145) },
-      i: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.035) },
     });
   });
 
   it("when invalidated node returns same result, dependents aren't reevaluated ", () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    observeAll(graph);
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
 
     // Act
 
@@ -180,27 +138,19 @@ describe('evaluation', () => {
       graph.getNode('c')?.invalidate();
 
       // Re-evaluate
-      spyOnCalculates(graph);
+      tracker.spyOnCalculates();
     });
 
     // Assert
-    expect(mapValues(calculateSpies, (spy: jest.SpyInstance) => spy.mock.calls.length)).toEqual({
-      a: 0,
-      b: 0,
-      c: 1,
-      d: 0,
-      e: 0,
-      f: 0,
-      g: 0,
-      h: 0,
-      i: 0,
-    });
+    tracker.expectToHaveCalculated(['c']);
   });
 
   it('propagates evaluation errors', () => {
     // Arrange
     const graph = TestGraphs.make3By3NuralNet();
-    observeAll(graph);
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
 
     // Act
     graph.act(() => {
@@ -211,11 +161,8 @@ describe('evaluation', () => {
     });
 
     // Assert
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
-      b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
+    tracker.expectNodeStateChanges({
       c: { status: NodeStatus.OwnError },
-      d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
       e: { status: NodeStatus.DependencyError },
       f: { status: NodeStatus.DependencyError },
       g: { status: NodeStatus.DependencyError },
@@ -227,12 +174,13 @@ describe('evaluation', () => {
   it('evaluates for medium acyclic', () => {
     // Arrange
     const graph = TestGraphs.makeMediumAcylic();
+    const tracker = new GraphTracker(graph);
 
     // Act
-    observeAll(graph);
+    tracker.observeAll();
 
     // Assert
-    expectNodeStates(graph, {
+    tracker.expectNodeStateChanges({
       a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
       b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
       c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
@@ -245,12 +193,13 @@ describe('evaluation', () => {
     it('evaluates non-cycle node in graph with cycle', () => {
       // Arrange
       const graph = TestGraphs.makeSmallSelfCycle();
+      const tracker = new GraphTracker(graph);
 
       // Act
-      observeAll(graph);
+      tracker.observeAll();
 
       // Assert
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.CicularDependencyError },
         b: { status: NodeStatus.Resolved, value: 1 },
       });
@@ -259,33 +208,35 @@ describe('evaluation', () => {
     it('evaluates successfully after breaking a self-cycle', () => {
       // Arrange
       const graph = TestGraphs.makeSmallSelfCycle();
-      observeAll(graph);
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
 
       // Act
 
       graph.act(() => {
         graph.getNode('a')?.replace([], () => 2);
-        spyOnCalculates(graph);
+        tracker.spyOnCalculates();
       });
 
       // Assert
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.Resolved, value: 2 },
-        b: { status: NodeStatus.Resolved, value: 1 },
       });
 
-      expectToHaveRecalculated(['a']);
+      tracker.expectToHaveCalculated(['a']);
     });
 
     it('evaluates non-cycle nodes of medium 3-node cycle', () => {
       // Arrange
       const graph = TestGraphs.makeMedium3NodeCycle();
+      const tracker = new GraphTracker(graph);
 
       // Act
-      observeAll(graph);
+      tracker.observeAll();
 
       // Assert
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.CicularDependencyError },
         b: { status: NodeStatus.CicularDependencyError },
         c: { status: NodeStatus.CicularDependencyError },
@@ -297,18 +248,19 @@ describe('evaluation', () => {
     it('evaluates after breaking a 3-node cycle', () => {
       // Arrange
       const graph = TestGraphs.makeMedium3NodeCycle();
+      const tracker = new GraphTracker(graph);
 
       // Act
-      observeAll(graph);
+      tracker.observeAll();
 
       // Assert
 
       graph.act(() => {
         graph.getNode('a')?.replace([], () => 2);
-        spyOnCalculates(graph);
+        tracker.spyOnCalculates();
       });
 
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.Resolved, value: 2 },
         b: { status: NodeStatus.Resolved, value: 1 },
         c: { status: NodeStatus.Resolved, value: 3 },
@@ -316,17 +268,18 @@ describe('evaluation', () => {
         e: { status: NodeStatus.Resolved, value: 1 },
       });
 
-      expectToHaveRecalculated(['a', 'b', 'c']);
+      tracker.expectToHaveCalculated(['a', 'c', 'b']);
     });
 
     it('detects figure-eight cycle', () => {
       // Arrange
       const graph = TestGraphs.makeMediumFigureEightCycle();
+      const tracker = new GraphTracker(graph);
 
       // Act
-      observeAll(graph);
+      tracker.observeAll();
 
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.CicularDependencyError },
         b: { status: NodeStatus.CicularDependencyError },
         c: { status: NodeStatus.CicularDependencyError },
@@ -340,9 +293,10 @@ describe('evaluation', () => {
     it('nodes are unevaluated if unobserved', () => {
       // Arrange
       const graph = TestGraphs.makeSmallAcyclic();
+      const tracker = new GraphTracker(graph);
 
       // Assert
-      expectNodeStates(graph, {
+      tracker.expectNodeStates({
         a: { status: NodeStatus.Unevaluated },
         b: { status: NodeStatus.Unevaluated },
         c: { status: NodeStatus.Unevaluated },
@@ -352,125 +306,392 @@ describe('evaluation', () => {
     it('only observed subgraph evaluated', () => {
       // Arrange
       const graph = TestGraphs.make3By3NuralNet();
+      const tracker = new GraphTracker(graph);
 
       // Act
-      graph.act(() => graph.getNode('g')?.addObserver(noopObserver));
+      tracker.observe(['g']);
 
       // assert
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.3) },
         b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.2) },
         c: { status: NodeStatus.Resolved, value: expect.closeTo2(0.1) },
         d: { status: NodeStatus.Resolved, value: expect.closeTo2(0.26) },
         e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.16) },
-        f: { status: NodeStatus.Unevaluated },
         g: { status: NodeStatus.Resolved, value: expect.closeTo2(0.17) },
-        h: { status: NodeStatus.Unevaluated },
-        i: { status: NodeStatus.Unevaluated },
       });
+
+      tracker.expectObservationBatch([
+        ['g', { status: NodeStatus.Resolved, value: expect.closeTo2(0.17) }],
+      ]);
     });
 
     it('only observed subgraph evaluated after observers removed', () => {
       // Arrange
       const graph = TestGraphs.make3By3NuralNet();
+      const tracker = new GraphTracker(graph);
+      tracker.observe(['g', 'i']);
+      tracker.resetExpectations();
 
       // Act
-      graph.act(() => {
-        graph.getNode('g')?.addObserver(noopObserver);
-        graph.getNode('i')?.addObserver(noopObserver);
-      });
 
       graph.act(() => {
         // I becomes unobserved
-        graph.getNode('i')?.removeObserver(noopObserver);
+        tracker.stopObserving(['i']);
         // Update first layer
         graph.getNode('a')?.replace([], () => 0.3);
         graph.getNode('b')?.replace([], () => 0.2);
         graph.getNode('c')?.replace([], () => -0.1);
-        spyOnCalculates(graph);
+        tracker.spyOnCalculates();
       });
 
       // assert
 
       // Only nodes that feed into G are recalculated
-      expectToHaveRecalculated(['a', 'b', 'c', 'd', 'e', 'g']);
+      tracker.expectToHaveCalculated(['a', 'b', 'c', 'd', 'e', 'g']);
 
-      expectNodeStates(graph, {
+      tracker.expectNodeStateChanges({
         a: { status: NodeStatus.Resolved, value: expect.closeTo2(0.3) },
         b: { status: NodeStatus.Resolved, value: expect.closeTo2(0.2) },
         c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
         d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.26) },
         e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        f: expect.anything(),
         g: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.17) },
-        h: expect.anything(),
-        i: expect.anything(),
       });
     });
   });
 
-  describe('delete nodes', () => {
-    it('deletes middle node', () => {
-      // Arrange
-      const graph = TestGraphs.makeMediumAcylic();
-      observeAll(graph);
+  describe('async', () => {
+    function getCompletion(
+      result: TransactionResult | undefined,
+    ): Promise<AsyncTransactionCompletion> {
+      assert(result?.sync === false);
 
-      // Act
-      graph.act(() => {
-        graph.deleteNode('d');
-      });
+      return result.completion;
+    }
+
+    async function tick() {
+      // Takes two promise resolutions to complete continuation code within evaluation
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
+    /**
+     * Replace a data node with an async function
+     * @returns a tuple with the deferred object and a transaction result. The deferred promise may
+     * either resolve with the node value or resolve to a calculate function taking in dependency values
+     * and returning the node value.
+     */
+    function makeNodeDeferred(
+      graph: Graph,
+      nodeId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ): [Deferred<((...deps: any[]) => unknown) | unknown>, TransactionResult | undefined] {
+      const node = assertDefined(graph.getNode(nodeId));
+      const deferredResult = new Deferred<((...deps: unknown[]) => unknown) | unknown>();
+
+      const transactionResult = graph.act(() =>
+        node.replaceWithAsync<unknown[]>(node.dependencies, async (...deps) => {
+          const result = await deferredResult.promise;
+          return typeof result === 'function' ? result(...deps) : result;
+        }),
+      );
+
+      return [deferredResult, transactionResult];
+    }
+
+    it('single async node', async () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
+      const tracker = new GraphTracker(graph);
+
+      // Act: Observe all nodes
+      const completionPromise = getCompletion(tracker.observeAll());
 
       // Assert
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        e: { status: NodeStatus.MissingDependencyError },
-      });
+      // A evaluted immediately
+      tracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B, which resolves C
+      deferredResultB.resolve(3);
+
+      await tick();
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 3 }],
+        ['c', { status: NodeStatus.Resolved, value: 7 }],
+      ]);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
     });
 
-    it('deletes leaf node', () => {
-      // Arrange
-      const graph = TestGraphs.makeMediumAcylic();
-      observeAll(graph);
+    it('chained async', async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const [deferredResultA] = makeNodeDeferred(graph, 'a');
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
 
-      // Act
-      graph.act(() => {
-        graph.deleteNode('c');
-      });
+      const tracker = new GraphTracker(graph);
+      tracker.spyOnCalculates();
 
-      // Assert
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-        d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.1) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(0.01) },
-      });
+      // Observe all nodes
+      const completionPromise = getCompletion(tracker.observeAll());
+
+      // Resolve A
+      deferredResultA.resolve(1);
+
+      await tick();
+
+      tracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B
+      deferredResultB.resolve(3);
+
+      await tick();
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 3 }],
+        ['c', { status: NodeStatus.Resolved, value: 7 }],
+      ]);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
     });
 
-    it('recovers after node with missing dependency replaced', () => {
-      // Arrange
-      const graph = TestGraphs.makeMediumAcylic();
-      observeAll(graph);
+    it('parallel async', async () => {
+      const graph = TestGraphs.makeSmallChevron();
+      const [deferredResultA] = makeNodeDeferred(graph, 'a');
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
 
-      // Act
+      const tracker = new GraphTracker(graph);
+      tracker.spyOnCalculates();
+
+      // Observe all nodes
+      const completionPromise = getCompletion(tracker.observeAll());
+
+      // a and b invoked immediately in parallel, but not resolved
+      tracker.expectToHaveCalculated(['a', 'b']);
+
+      // Resolve A
+      deferredResultA.resolve(1);
+
+      await tick();
+
+      tracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B
+      deferredResultB.resolve(3);
+
+      await tick();
+
+      // B notified and c notified synchronously
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 3 }],
+        ['c', { status: NodeStatus.Resolved, value: 4 }],
+      ]);
+
+      tracker.expectToHaveCalculated(['c']);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
+    });
+
+    it("Node's async exection canceled by replacement", async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const [firstDeferredResult] = makeNodeDeferred(graph, 'b');
+      const tracker = new GraphTracker(graph);
+      const firstTransaction = tracker.observeAll();
+
+      await tick();
+
+      // B is replaced while it's still being evaluated
+      const [secondDeferredResult, secondTransaction] = makeNodeDeferred(graph, 'b');
+
+      await tick();
+
+      // Assert b still unevaluated
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+
+      firstDeferredResult.resolve(5);
+
+      // Complete both calls to b
+      secondDeferredResult.resolve(3);
+
+      await tick();
+
+      await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
+      await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      tracker.expectObservationBatches([
+        // First transaction only calculates a before getting cancelled
+        [['a', { status: NodeStatus.Resolved, value: 1 }]],
+        // Second transaction re-calculates b and c
+        [
+          ['b', { status: NodeStatus.Resolved, value: 3 }],
+          ['c', { status: NodeStatus.Resolved, value: 7 }],
+        ],
+      ]);
+    });
+
+    it("Node's async exection canceled by replacement of dependency", async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const [firstDeferredResult] = makeNodeDeferred(graph, 'b');
+      const tracker = new GraphTracker(graph);
+      const firstTransaction = tracker.observeAll();
+
+      await tick();
+
+      // B is replaced while it's still being evaluated
+      let secondDeferredResult: Deferred<unknown> | undefined;
+      const secondTransaction = graph.act(() => {
+        [secondDeferredResult] = makeNodeDeferred(graph, 'b');
+        graph.getNode('a')?.replace([], () => 2);
+      });
+
+      await tick();
+
+      // B is still not evaluated
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+
+      // Complete both calls to b
+      firstDeferredResult.resolve(7);
+      assertDefined(secondDeferredResult).resolve((a: number) => {
+        expect(a).toBe(2);
+        return a * 2 - 1;
+      });
+
+      await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
+      await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      tracker.expectObservationBatches([
+        // First transaction calculates a
+        [['a', { status: NodeStatus.Resolved, value: 1 }]],
+        // Second transaction re-calculates a
+        [['a', { status: NodeStatus.Resolved, value: 2 }]],
+        // Then calculates b and c
+        [
+          ['b', { status: NodeStatus.Resolved, value: 3 }],
+          ['c', { status: NodeStatus.Resolved, value: 7 }],
+        ],
+      ]);
+    });
+
+    it('Waiting nodes from cancelled transaction recalculated in next transaction', async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+
+      const nodeBCalculate = jest
+        .fn()
+        // First calculate returns 3
+        .mockResolvedValueOnce(3)
+        // second calculate returns a promise that never resolves
+        .mockReturnValueOnce(new Promise(() => {}))
+        // Third calculate returns 4
+        .mockResolvedValueOnce(4);
+
+      // Run first transaction, evaluating graph fully
+      await getCompletion(
+        graph.act(() => {
+          const nodeB = assertDefined(graph.getNode('b'));
+          nodeB.replaceWithAsync(nodeB.dependencies, nodeBCalculate);
+          tracker.observeAll();
+        }),
+      );
+
+      // Start second transaction, replacing a
       graph.act(() => {
-        graph.deleteNode('d');
+        assertDefined(graph.getNode('a')).replace([], () => 2);
+      });
+      await tick();
+      tracker.resetExpectations();
+
+      // Third transaction While b is calculating, e in added and observed, causing second transaction to be cancelled
+      const thirdTransaction = graph.act(() => {
+        // Add a disconnected node
+        graph.addNode('e', [], () => 0);
+        tracker.observe(['e']);
       });
 
-      graph.act(() => {
-        graph
-          .getNode('e')
-          ?.replace([assertDefined(graph.getNode('a') as DataNode<number>)], (a) => 0.2 * a);
+      await expect(getCompletion(thirdTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      tracker.expectNodeStateChanges({
+        e: { status: NodeStatus.Resolved, value: 0 },
+        b: { status: NodeStatus.Resolved, value: 4 },
+        c: { status: NodeStatus.Resolved, value: 11 },
       });
 
-      // Assert
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.4) },
-        b: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.5) },
-        c: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
-        e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.08) },
-      });
+      // Ensure that after third transaction, b and c are updated
+      tracker.expectObservationBatches([
+        // Third transaction
+        [['e', { status: NodeStatus.Resolved, value: 0 }]],
+        [
+          ['b', { status: NodeStatus.Resolved, value: 4 }],
+          ['c', { status: NodeStatus.Resolved, value: 11 }],
+        ],
+      ]);
+    });
+  });
+});
+
+describe('delete nodes', () => {
+  it('deletes middle node', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
+
+    // Act
+    graph.act(() => {
+      graph.getNode('d')?.delete();
+    });
+
+    // Assert
+    tracker.expectNodeStateChanges({
+      e: { status: NodeStatus.DependencyError },
+      // d deleted
+      d: null,
+    });
+  });
+
+  it('deletes leaf node', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
+
+    // Act
+    graph.act(() => {
+      graph.getNode('c')?.delete();
+    });
+
+    // Assert
+    tracker.expectNodeStateChanges({
+      c: null, // c deleted
+    });
+  });
+
+  it('recovers after node with missing dependency replaced', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
+    tracker.resetExpectations();
+
+    // Act
+    graph.act(() => {
+      graph.getNode('d')?.delete();
+    });
+
+    graph.act(() => {
+      graph
+        .getNode('e')
+        ?.replace([assertDefined(graph.getNode('a') as DataNode<number>)], (a) => 0.2 * a);
+    });
+
+    // Assert
+    tracker.expectNodeStateChanges({
+      d: null, // d deleted
+      e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.08) },
     });
   });
 });
@@ -479,41 +700,43 @@ describe('act', () => {
   it("nested acts don't trigger recalculation", () => {
     // Arrange
     const graph = TestGraphs.makeSmallSelfCycle();
+    const tracker = new GraphTracker(graph);
 
     // Act
     graph.act(() => {
-      observeAll(graph);
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Unevaluated },
-        b: { status: NodeStatus.Unevaluated },
-      });
+      tracker.observeAll();
+      // No nodes updated
+      tracker.expectNodeStateChanges({});
       graph.act(() => {
         graph.getNode('a')?.replace([], () => 2);
       });
-      expectNodeStates(graph, {
-        a: { status: NodeStatus.Unevaluated },
-        b: { status: NodeStatus.Unevaluated },
-      });
+      // Still no nodes updated
+      tracker.expectNodeStateChanges({});
     });
 
     // Assert
-    expectNodeStates(graph, {
-      a: { status: NodeStatus.Resolved, value: 2 },
-      b: { status: NodeStatus.Resolved, value: 1 },
-    });
+    tracker.expectObservationBatch([
+      ['a', { status: NodeStatus.Resolved, value: 2 }],
+      ['b', { status: NodeStatus.Resolved, value: 1 }],
+    ]);
   });
 
   it("empty acts don't cause any updates", () => {
     // Arrange
     const graph = TestGraphs.makeSmallSelfCycle();
-    graph.act(() => observeAll(graph));
+    const tracker = new GraphTracker(graph);
+    tracker.observeAll();
 
     // Act
 
-    spyOnCalculates(graph);
+    tracker.spyOnCalculates();
     graph.act(() => {});
 
     // Assert
-    expectToHaveRecalculated([]);
+    tracker.expectToHaveCalculated([]);
   });
 });
+
+// TODO: add assertions for observer being called
+// TOOD: add test for multiple observers
+// TODO: add tests for observer batching

@@ -1,16 +1,19 @@
-import assert from 'assert';
-import { defaults } from 'lodash';
+import defaults from 'lodash/defaults';
 import DataNode, { DataNodesOf } from '../DataNode/DataNode';
-import { NodeStatus } from '../DataNode/NodeTypes';
-import { takeFromSet } from '../utils';
-import dfs from './dfs';
+import { CalculateFunction } from '../DataNode/NodeTypes';
+import { GraphTransaction } from './GraphTransaction';
 import { defaultOptions, GraphOptions } from './options';
-import { ReevaluationGraphState, Transaction } from './types';
+import { TransactionResult } from './types';
 
 class Graph implements Iterable<DataNode> {
-  private nodes: Map<string, DataNode> = new Map();
-  public transaction: Transaction | undefined;
-  private readonly options: GraphOptions;
+  private readonly nodes: Map<string, DataNode> = new Map();
+  public readonly options: GraphOptions;
+
+  private isInMutationPhase = false;
+  // Incrementing counter corresponding to most recent transaction
+  public transactionId = 0;
+  // Set of nodes that still needed to be evaluated in most recent transaction
+  private currentTransaction: GraphTransaction | undefined;
 
   constructor(options: Partial<GraphOptions> = {}) {
     this.options = defaults(defaultOptions, options);
@@ -19,9 +22,25 @@ class Graph implements Iterable<DataNode> {
   public addNode<TArgs extends unknown[], TResult>(
     id: string,
     dependencies: DataNodesOf<TArgs>,
-    calculate: (...args: TArgs) => TResult,
+    fn: (...args: TArgs) => TResult,
   ): DataNode<TResult> {
-    this.assertTransaction('addNode');
+    return this.addNodeInner(id, dependencies, { fn, sync: true });
+  }
+
+  public addAsyncNode<TArgs extends unknown[], TResult>(
+    id: string,
+    dependencies: DataNodesOf<TArgs>,
+    fn: (...args: TArgs) => Promise<TResult>,
+  ): DataNode<TResult> {
+    return this.addNodeInner<TArgs, TResult>(id, dependencies, { fn, sync: false });
+  }
+
+  private addNodeInner<TArgs extends unknown[], TResult>(
+    id: string,
+    dependencies: DataNodesOf<TArgs>,
+    calculate: CalculateFunction<TResult, TArgs>,
+  ): DataNode<TResult> {
+    this.assertTransaction('Graph.addNode()');
 
     if (this.nodes.has(id)) {
       throw new Error(`Node with id ${id} already exists`);
@@ -31,7 +50,7 @@ class Graph implements Iterable<DataNode> {
       this,
       id,
       dependencies,
-      calculate as (...args: unknown[]) => TResult,
+      calculate as CalculateFunction<TResult, unknown[]>,
     );
 
     for (const dep of dependencies) {
@@ -43,115 +62,10 @@ class Graph implements Iterable<DataNode> {
     return newNode;
   }
 
-  public deleteNode(id: string): void {
-    this.assertTransaction('deleteNode');
+  public deleteNodeInternal(node: DataNode): void {
+    this.assertTransaction('Graph.deleteNode()');
 
-    const node = this.getNode(id);
-    if (!node) {
-      throw new Error(`Node with id ${id} doesn't exist`);
-    }
-
-    // Mark all dependents as unevaluated since they've entered an error state
-    node.state = { status: NodeStatus.Deleted };
-    for (const dependent of node.dependents) {
-      dependent.invalidate();
-    }
-    // Remove dependencies to self
-    for (const dep of node.dependencies) {
-      dep.dependents.delete(node);
-    }
-
-    this.nodes.delete(id);
-  }
-
-  private makeReevaluationGraph(): ReevaluationGraphState {
-    const observed = Array.from(this.nodes.values()).filter((node) => node.hasObserver());
-
-    const unevaluated = new Set<DataNode>();
-    const observedSet = new Set<DataNode>();
-
-    // Traverse observed subgraph looking for unevaluated deps and cycles
-    // Future optimization: whether or not each node is directly or indirectly observed can be cached
-    // based on the set of observed nodes and graph topology
-    dfs(
-      observed,
-      (node, stack) => {
-        observedSet.add(node);
-        const priorNodeIndex = stack.indexOf(node);
-        if (priorNodeIndex >= 0) {
-          // Found cycle, set error on all cycle nodes
-          const cycle = stack.slice(priorNodeIndex);
-          for (const cycleNode of cycle) {
-            cycleNode.state = { status: NodeStatus.CicularDependencyError };
-            // Remove cycle nodes from unevaluated
-            unevaluated.delete(cycleNode);
-          }
-
-          return;
-        }
-
-        if (node.state.status === NodeStatus.Unevaluated) {
-          unevaluated.add(node);
-        }
-      },
-      'backward',
-    );
-
-    // Traverse forwards, recursively making nodes as unevaluated
-    dfs(
-      Array.from(unevaluated),
-      (node) => {
-        if (node.state.status !== NodeStatus.CicularDependencyError) {
-          unevaluated.add(node);
-        }
-      },
-      'forward',
-    );
-
-    const reevaluationGraph: ReevaluationGraphState = { ready: new Set(), waiting: new Map() };
-
-    // For all observed and unevaluated nodes, decide whether it's ready or is waiting on dependencies
-    for (const node of observedSet) {
-      if (unevaluated.has(node)) {
-        let numUnevaluatedDeps = 0;
-        for (const dep of node.dependencies) {
-          if (unevaluated.has(dep)) numUnevaluatedDeps++;
-        }
-        if (numUnevaluatedDeps) {
-          reevaluationGraph.waiting.set(node, numUnevaluatedDeps);
-        } else {
-          reevaluationGraph.ready.add(node);
-        }
-      }
-    }
-
-    return reevaluationGraph;
-  }
-
-  private evaluate(): void {
-    const { ready, waiting } = this.makeReevaluationGraph();
-
-    let readyNode: DataNode | undefined;
-
-    // eslint-disable-next-line no-cond-assign
-    while ((readyNode = takeFromSet(ready))) {
-      readyNode.evaluate();
-
-      for (const dependent of readyNode.dependents) {
-        const dependentCounter = waiting.get(dependent);
-        if (dependentCounter !== undefined) {
-          if (dependentCounter === 1) {
-            waiting.delete(dependent);
-            ready.add(dependent);
-          } else if (dependentCounter > 1) {
-            // Signal
-            waiting.set(dependent, dependentCounter - 1);
-          }
-        }
-      }
-    }
-
-    assert(!waiting.size, 'Exhausted ready queue with nodes still waiting');
+    this.nodes.delete(node.id);
   }
 
   getNode(id: string): DataNode | undefined {
@@ -164,36 +78,33 @@ class Graph implements Iterable<DataNode> {
 
   //#region transaction support
   public assertTransaction(name = 'method'): void {
-    if (!this.transaction) {
+    if (!this.isInMutationPhase) {
       throw new Error(`${name} must be called inside a transaction`);
     }
   }
 
   /**
    * Run mutations inside an action
+   * @returns TransactionResult, only for outermost act() call
    */
-  public act(callback: () => void): void {
-    if (this.transaction) {
+  public act(mutator: () => void): TransactionResult | undefined {
+    if (this.isInMutationPhase) {
       // If already inside a transaction, can just call callback
-      callback();
-      return;
+      mutator();
+      return undefined;
     }
 
-    const transaction = (this.transaction = { observedNodesChanged: new Set() });
+    this.isInMutationPhase = true;
+    this.transactionId++;
 
     try {
-      callback();
-
-      this.evaluate();
+      mutator();
     } finally {
-      this.options.observationBatcher(() => {
-        for (const node of transaction.observedNodesChanged) {
-          node.notifyObservers();
-        }
-      });
-
-      this.transaction = undefined;
+      this.isInMutationPhase = false;
     }
+
+    this.currentTransaction = new GraphTransaction(this, this.currentTransaction);
+    return this.currentTransaction.result;
   }
   //#endregion transaction support
 }

@@ -13,8 +13,6 @@ enum NodeStatus {
   DependencyError = 'depError',
   // Node is involved in a circular dependency
   CicularDependencyError = 'circularDepError',
-  // Node has dependency which no longer exists
-  MissingDependencyError = 'missingDepError',
   // Graph was in unexpected state
   InternalError = 'internalError',
   // Node is deleted
@@ -33,7 +31,6 @@ type NodeState<TResult> =
         // TODO: include cycle
         | NodeStatus.CicularDependencyError
         // TODO: include dependency path
-        | NodeStatus.MissingDependencyError
         | NodeStatus.InternalError
         | NodeStatus.Deleted;
     }
@@ -42,6 +39,10 @@ type NodeState<TResult> =
       value: TResult;
     };
 
-type Observer<TResult> = (result: TResult) => void;
+type Observer<TResult> = (state: NodeState<TResult>) => void;
 
-export { NodeStatus, NodeState, Observer };
+type CalculateFunction<TResult, TArgs extends unknown[]> =
+  | { sync: true; fn: (...args: TArgs) => TResult }
+  | { sync: false; fn: (...args: TArgs) => Promise<TResult> };
+
+export { NodeStatus, NodeState, Observer, CalculateFunction };

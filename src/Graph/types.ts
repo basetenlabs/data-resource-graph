@@ -8,9 +8,13 @@ export interface ReevaluationGraphState {
   waiting: Map<DataNode, number>;
 }
 
-export interface Transaction {
-  /**
-   * Set of nodes whose state has changed during the transaction
-   */
-  observedNodesChanged: Set<DataNode>;
-}
+export type AsyncTransactionCompletion = { wasCancelled: boolean };
+
+export type TransactionResult =
+  | {
+      sync: true;
+    }
+  | {
+      sync: false;
+      completion: Promise<AsyncTransactionCompletion>;
+    };
