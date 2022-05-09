@@ -15,8 +15,16 @@ import { AsyncTransactionCompletion, TransactionResult } from './types';
 export class GraphTransaction {
   private readonly transactionId: number;
 
-  // Set of nodes whose observers are waiting for notification. This queue should always be flushed synchronously
+  /**
+   * Set of nodes whose observers are waiting for notification. This queue should always be flushed
+   * in the current execution stack
+   */
   private readonly notificationQueue = new Set<DataNode>();
+  /**
+   * Set of nodes which should be notified by the end of the transaction, either as they're re-evaluated
+   * or at the very end of a non-cancelled transaction.
+   */
+  private readonly nodesPendingNotification: Set<DataNode> = new Set();
 
   public readonly result: TransactionResult;
   private readonly completionDeferred = new Deferred<AsyncTransactionCompletion>();
@@ -87,6 +95,11 @@ export class GraphTransaction {
           // Carry over nodes that were supposed to be executed last transaction but weren't
           unevaluated.add(node);
         }
+
+        // Needs notification
+        if (node.hasPendingObservers()) {
+          this.nodesPendingNotification.add(node);
+        }
       },
       'backward',
     );
@@ -118,11 +131,21 @@ export class GraphTransaction {
     }
   }
 
-  private flushNotificationQueue() {
-    if (this.notificationQueue.size) {
+  private flushNotificationQueue(flushNodesPendingNotification = false) {
+    if (
+      this.notificationQueue.size ||
+      (flushNodesPendingNotification && this.nodesPendingNotification.size)
+    ) {
       assertRunOnce(this.graph.options.observationBatcher)(() => {
         for (const node of this.notificationQueue) {
           node.notifyObservers();
+          this.nodesPendingNotification.delete(node);
+        }
+        if (flushNodesPendingNotification) {
+          for (const node of this.nodesPendingNotification) {
+            node.notifyObservers();
+          }
+          this.nodesPendingNotification.clear();
         }
       });
       this.notificationQueue.clear();
@@ -157,7 +180,7 @@ export class GraphTransaction {
         !this.nodesPendingExecution.size,
         'Found nodes pending execution after evaluation ended',
       );
-      this.flushNotificationQueue();
+      this.flushNotificationQueue(true);
       this.complete(false);
       return true;
     }
@@ -168,7 +191,6 @@ export class GraphTransaction {
   private doWork(): void {
     // Check for cancellation
     if (this.graph.transactionId !== this.transactionId) {
-      this.flushNotificationQueue();
       this.complete(true);
       return;
     }
@@ -181,9 +203,9 @@ export class GraphTransaction {
 
     // Evaluate all synchronous ready nodes
     while ((readyNode = takeFromSetIf(this.ready, (node) => !node.isAsync()))) {
-      const shouldNotify = readyNode.evaluate();
+      readyNode.evaluate();
       this.nodesPendingExecution.delete(readyNode);
-      if (shouldNotify) this.notificationQueue.add(readyNode);
+      this.notificationQueue.add(readyNode);
       this.signalDependents(readyNode);
     }
 
@@ -198,10 +220,10 @@ export class GraphTransaction {
         const node = readyNode;
         this.running.add(node);
         node.evaluateAsync().then(
-          (shouldNotify) => {
+          () => {
             this.running.delete(node);
             this.nodesPendingExecution.delete(node);
-            if (shouldNotify) this.notificationQueue.add(node);
+            this.notificationQueue.add(node);
             this.signalDependents(node);
             // Run work loop again
             this.doWork();
