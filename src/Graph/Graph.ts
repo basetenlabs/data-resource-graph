@@ -1,4 +1,3 @@
-import defaults from 'lodash/defaults';
 import DataNode from '../DataNode';
 import { CalculateFunction, DataNodesOf } from '../DataNode/types';
 import { GraphTransaction } from './GraphTransaction';
@@ -22,7 +21,7 @@ class Graph implements Iterable<DataNode> {
   private currentTransaction: GraphTransaction | undefined;
 
   constructor(options: Partial<GraphOptions> = {}) {
-    this.options = defaults(defaultOptions, options);
+    this.options = { ...defaultOptions, ...options };
   }
 
   public addNode<TArgs extends unknown[], TResult>(
