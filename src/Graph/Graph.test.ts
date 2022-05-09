@@ -1,12 +1,12 @@
 import assert from 'assert';
 import DataNode from '../DataNode/DataNode';
 import { NodeStatus } from '../DataNode/NodeTypes';
-import { graphBuilder } from '../Test/graphBuilder';
 import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
 import { Deferred } from '../utils/Deferred';
 import { assertDefined } from '../utils/utils';
+import Graph from './Graph';
 import { AsyncTransactionCompletion, TransactionResult } from './types';
 
 const syncTransactionResult: TransactionResult = { sync: true };
@@ -42,7 +42,7 @@ describe('evaluation', () => {
     const graph = TestGraphs.make3By3NuralNet();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
     graph.act(() => {
@@ -69,7 +69,7 @@ describe('evaluation', () => {
     const graph = TestGraphs.make3By3NuralNet();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
 
@@ -102,7 +102,7 @@ describe('evaluation', () => {
     const graph = TestGraphs.make3By3NuralNet();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
 
@@ -150,7 +150,7 @@ describe('evaluation', () => {
     const graph = TestGraphs.make3By3NuralNet();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
     graph.act(() => {
@@ -210,7 +210,7 @@ describe('evaluation', () => {
       const graph = TestGraphs.makeSmallSelfCycle();
       const tracker = new GraphTracker(graph);
       tracker.observeAll();
-      tracker.clearNodeStateChanges();
+      tracker.resetExpectations();
 
       // Act
 
@@ -331,7 +331,7 @@ describe('evaluation', () => {
       const graph = TestGraphs.make3By3NuralNet();
       const tracker = new GraphTracker(graph);
       tracker.observe(['g', 'i']);
-      tracker.clearNodeStateChanges();
+      tracker.resetExpectations();
 
       // Act
 
@@ -376,20 +376,40 @@ describe('evaluation', () => {
       await Promise.resolve();
     }
 
-    it('single async node', async () => {
-      const deferredResultB = new Deferred<number>();
-      const graph = graphBuilder(0).act((builder) =>
-        builder
-          .addNode('a', [], () => 1)
-          .addNodeAsync('b', ['a'], (_a) => deferredResultB.promise)
-          .addNode('c', ['b'], (b) => 4 * b - 5),
-      ).graph;
+    /**
+     * Replace a data node with an async function
+     * @returns a tuple with the deferred object and a transaction result. The deferred promise may
+     * either resolve with the node value or resolve to a calculate function taking in dependency values
+     * and returning the node value.
+     */
+    function makeNodeDeferred(
+      graph: Graph,
+      nodeId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ): [Deferred<((...deps: any[]) => unknown) | unknown>, TransactionResult | undefined] {
+      const node = assertDefined(graph.getNode(nodeId));
+      const deferredResult = new Deferred<((...deps: unknown[]) => unknown) | unknown>();
 
+      const transactionResult = graph.act(() =>
+        node.replaceWithAsync<unknown[]>(node.dependencies, async (...deps) => {
+          const result = await deferredResult.promise;
+          return typeof result === 'function' ? result(...deps) : result;
+        }),
+      );
+
+      return [deferredResult, transactionResult];
+    }
+
+    it('single async node', async () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
       const tracker = new GraphTracker(graph);
 
-      // Observe all nodes
+      // Act: Observe all nodes
       const completionPromise = getCompletion(tracker.observeAll());
 
+      // Assert
       // A evaluted immediately
       tracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
 
@@ -398,7 +418,6 @@ describe('evaluation', () => {
 
       await tick();
 
-      // Their observers
       tracker.expectObservationBatch([
         ['b', { status: NodeStatus.Resolved, value: 3 }],
         ['c', { status: NodeStatus.Resolved, value: 7 }],
@@ -408,14 +427,9 @@ describe('evaluation', () => {
     });
 
     it('chained async', async () => {
-      const deferredResultA = new Deferred<number>();
-      const deferredResultB = new Deferred<number>();
-      const graph = graphBuilder(0).act((builder) =>
-        builder
-          .addNodeAsync('a', [], () => deferredResultA.promise)
-          .addNodeAsync('b', ['a'], (_a) => deferredResultB.promise)
-          .addNode('c', ['b'], (b) => 4 * b - 5),
-      ).graph;
+      const graph = TestGraphs.makeSmallChain();
+      const [deferredResultA] = makeNodeDeferred(graph, 'a');
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
 
       const tracker = new GraphTracker(graph);
       tracker.spyOnCalculates();
@@ -444,15 +458,9 @@ describe('evaluation', () => {
     });
 
     it('parallel async', async () => {
-      const deferredResultA = new Deferred<number>();
-      const deferredResultB = new Deferred<number>();
-
-      const graph = graphBuilder(0).act((builder) =>
-        builder
-          .addNodeAsync('a', [], () => deferredResultA.promise)
-          .addNodeAsync('b', [], () => deferredResultB.promise)
-          .addNode('c', ['a', 'b'], (a, b) => a + b),
-      ).graph;
+      const graph = TestGraphs.makeSmallChevron();
+      const [deferredResultA] = makeNodeDeferred(graph, 'a');
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
 
       const tracker = new GraphTracker(graph);
       tracker.spyOnCalculates();
@@ -485,6 +493,120 @@ describe('evaluation', () => {
 
       await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
     });
+
+    it("Node's async exection canceled by replacement", async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const [firstDeferredResult] = makeNodeDeferred(graph, 'b');
+      const tracker = new GraphTracker(graph);
+      const firstTransaction = tracker.observeAll();
+
+      await tick();
+
+      // B is replaced while it's still being evaluated
+      const [secondDeferredResult, secondTransaction] = makeNodeDeferred(graph, 'b');
+
+      await tick();
+
+      // Assert b still unevaluated
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+
+      firstDeferredResult.resolve(5);
+
+      // Complete both calls to b
+      secondDeferredResult.resolve(3);
+
+      await tick();
+
+      await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
+      await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      tracker.expectObservationBatches([
+        // First transaction only calculates a before getting cancelled
+        [['a', { status: NodeStatus.Resolved, value: 1 }]],
+        // Second transaction re-calculates b and c
+        [
+          ['b', { status: NodeStatus.Resolved, value: 3 }],
+          ['c', { status: NodeStatus.Resolved, value: 7 }],
+        ],
+      ]);
+    });
+
+    it("Node's async exection canceled by replacement of dependency", async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const [firstDeferredResult] = makeNodeDeferred(graph, 'b');
+      const tracker = new GraphTracker(graph);
+      const firstTransaction = tracker.observeAll();
+
+      await tick();
+
+      // B is replaced while it's still being evaluated
+      let secondDeferredResult: Deferred<unknown> | undefined;
+      const secondTransaction = graph.act(() => {
+        [secondDeferredResult] = makeNodeDeferred(graph, 'b');
+        graph.getNode('a')?.replace([], () => 2);
+      });
+
+      await tick();
+
+      // B is still not evaluated
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+
+      // Complete both calls to b
+      firstDeferredResult.resolve(7);
+      assertDefined(secondDeferredResult).resolve((a: number) => {
+        expect(a).toBe(2);
+        return a * 2 - 1;
+      });
+
+      await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
+      await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      tracker.expectObservationBatches([
+        // First transaction calculates a
+        [['a', { status: NodeStatus.Resolved, value: 1 }]],
+        // Second transaction re-calculates a
+        [['a', { status: NodeStatus.Resolved, value: 2 }]],
+        // Then calculates b and c
+        [
+          ['b', { status: NodeStatus.Resolved, value: 3 }],
+          ['c', { status: NodeStatus.Resolved, value: 7 }],
+        ],
+      ]);
+    });
+
+    it('Waiting nodes from cancelled transaction recalculated in next transaction', async () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      const [deferredResultB, firstTransaction] = makeNodeDeferred(graph, 'b');
+
+      // While b is calculating, e in added and observed, causing first transaction to be cancelled
+      const secondTransaction = graph.act(() => {
+        // Add a disconnected node
+        graph.addNode('e', [], () => 0);
+        tracker.observe(['e']);
+      });
+
+      await tick();
+
+      assertDefined(deferredResultB).resolve(3);
+
+      await tick();
+
+      tracker.expectObservationBatches([
+        [['e', { status: NodeStatus.Resolved, value: 0 }]],
+        [
+          ['b', { status: NodeStatus.Resolved, value: 3 }],
+          ['c', { status: NodeStatus.Resolved, value: 7 }],
+        ],
+      ]);
+
+      await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
+      await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
+    });
   });
 });
 
@@ -494,7 +616,7 @@ describe('delete nodes', () => {
     const graph = TestGraphs.makeMediumAcylic();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
     graph.act(() => {
@@ -514,7 +636,7 @@ describe('delete nodes', () => {
     const graph = TestGraphs.makeMediumAcylic();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
     graph.act(() => {
@@ -532,7 +654,7 @@ describe('delete nodes', () => {
     const graph = TestGraphs.makeMediumAcylic();
     const tracker = new GraphTracker(graph);
     tracker.observeAll();
-    tracker.clearNodeStateChanges();
+    tracker.resetExpectations();
 
     // Act
     graph.act(() => {

@@ -325,9 +325,8 @@ class Graph implements Iterable<DataNode> {
 
     try {
       mutator();
-    } catch (err) {
+    } finally {
       this.isInMutationPhase = false;
-      throw err;
     }
 
     const reevaluationGraph = this.makeReevaluationGraph();
@@ -343,8 +342,6 @@ class Graph implements Iterable<DataNode> {
     } else {
       // Sync evaluation
       this.evaluateSync(reevaluationGraph);
-
-      this.isInMutationPhase = false;
 
       return { sync: true };
     }

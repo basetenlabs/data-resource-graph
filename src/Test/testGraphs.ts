@@ -19,6 +19,14 @@ const testGraphs = {
         .addNode('c', ['b'], (b) => 4 * b - 5),
     ).graph,
 
+  makeSmallChevron: () =>
+    graphBuilder(0).act((builder) =>
+      builder
+        .addNode('a', [], () => 1)
+        .addNode('b', [], () => 2)
+        .addNode('c', ['a', 'b'], (a, b) => a + b),
+    ).graph,
+
   makeMediumAcylic: () =>
     graphBuilder(0).act((builder) =>
       builder

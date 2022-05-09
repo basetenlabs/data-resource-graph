@@ -111,12 +111,18 @@ export class GraphTracker {
    */
   public expectObservationBatches(expectedBatches: Observation[][]): void {
     expect(this.currentObservationBatches).toEqual(expectedBatches);
-    // Clear array
-    this.currentObservationBatches = [];
+    this.resetObservationBatches();
   }
 
   public expectObservationBatch(expectedBatch: Observation[]): void {
     this.expectObservationBatches([expectedBatch]);
+  }
+
+  /**
+   * Reset state about observed observation batches. May be called at end of test set-up
+   */
+  public resetObservationBatches(): void {
+    this.currentObservationBatches = [];
   }
 
   /**
@@ -181,7 +187,16 @@ export class GraphTracker {
    */
   public expectToHaveCalculated(expectedNodeIds: string[]): void {
     expect(this.currentCalculatedNodes).toEqual(expectedNodeIds);
-    // Clear array
+    this.resetCalculationSpy();
+  }
+
+  public resetCalculationSpy(): void {
     this.currentCalculatedNodes = [];
+  }
+
+  public resetExpectations(): void {
+    this.resetObservationBatches();
+    this.clearNodeStateChanges();
+    this.resetCalculationSpy();
   }
 }
