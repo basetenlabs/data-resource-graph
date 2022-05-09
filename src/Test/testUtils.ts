@@ -1,8 +1,8 @@
 import fromPairs from 'lodash/fromPairs';
 import mapValues from 'lodash/mapValues';
-import DataNode from '../DataNode/DataNode';
-import { NodeState } from '../DataNode/NodeTypes';
-import Graph from '../Graph/Graph';
+import DataNode from '../DataNode';
+import { NodeState } from '../DataNode/types';
+import Graph from '../Graph';
 
 /**
  * Deeply replaces node referenced with their IDs for simpler assertions

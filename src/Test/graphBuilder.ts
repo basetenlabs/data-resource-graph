@@ -1,5 +1,5 @@
-import DataNode from '../DataNode/DataNode';
-import Graph from '../Graph/Graph';
+import DataNode from '../DataNode';
+import Graph from '../Graph';
 
 export type GraphBuilder<TValue> = {
   addNode(

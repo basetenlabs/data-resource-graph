@@ -1,5 +1,5 @@
-import assert from 'assert';
-import DataNode from '../DataNode/DataNode';
+import DataNode from '../DataNode';
+import assert from '../utils/assert';
 
 export type DfsVisitor =
   | ((node: DataNode, stack: DataNode[]) => void)

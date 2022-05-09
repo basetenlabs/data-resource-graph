@@ -1,0 +1,53 @@
+/**
+ * Config file for API Extractor.  For more info, please visit: https://api-extractor.com
+ */
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+
+  "mainEntryPointFilePath": "<projectFolder>/lib/index.d.ts",
+
+  "apiReport": {
+    "enabled": false
+  },
+
+  "docModel": {
+    "enabled": false
+  },
+
+  /**
+   * Configures how the .d.ts rollup file will be generated.
+   */
+  "dtsRollup": {
+    "enabled": true,
+    "untrimmedFilePath": "",
+    "publicTrimmedFilePath": "<projectFolder>/dist/types.d.ts"
+  },
+
+  "newlineKind": "lf",
+  "messages": {
+    "compilerMessageReporting": {
+      "default": {
+        "logLevel": "error"
+      }
+    },
+    "extractorMessageReporting": {
+      "default": {
+        "logLevel": "error"
+      },
+
+      "ae-forgotten-export": {
+        "logLevel": "error"
+      },
+
+      "ae-internal-missing-underscore": {
+        "logLevel": "none"
+      }
+    },
+
+    "tsdocMessageReporting": {
+      "default": {
+        "logLevel": "error"
+      }
+    }
+  }
+}

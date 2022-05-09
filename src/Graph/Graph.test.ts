@@ -1,9 +1,9 @@
-import assert from 'assert';
-import DataNode from '../DataNode/DataNode';
-import { NodeStatus } from '../DataNode/NodeTypes';
+import DataNode from '../DataNode';
+import { NodeStatus } from '../DataNode/types';
 import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
+import assert from '../utils/assert';
 import { Deferred } from '../utils/Deferred';
 import { assertDefined } from '../utils/utils';
 import Graph from './Graph';

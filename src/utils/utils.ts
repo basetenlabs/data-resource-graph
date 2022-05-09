@@ -1,6 +1,6 @@
-import assert from 'assert';
 import isNil from 'lodash/isNil';
 import { BatchFunction } from '../Graph/options';
+import assert from '../utils/assert';
 
 export function takeFromSet<T>(set: Set<T>): T | undefined {
   for (const el of set) {

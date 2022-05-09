@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import Graph from '../Graph/Graph';
+import Graph from '../Graph';
 import TestGraphs from './testGraphs';
 
 function generateMermaidVisual(graph: Graph): string {
