@@ -575,37 +575,58 @@ describe('evaluation', () => {
     });
 
     it('Waiting nodes from cancelled transaction recalculated in next transaction', async () => {
-      // Arrange
       const graph = TestGraphs.makeSmallChain();
       const tracker = new GraphTracker(graph);
-      tracker.observeAll();
+
+      const nodeBCalculate = jest
+        .fn()
+        // First calculate returns 3
+        .mockResolvedValueOnce(3)
+        // second calculate returns a promise that never resolves
+        .mockReturnValueOnce(new Promise(() => {}))
+        // Third calculate returns 4
+        .mockResolvedValueOnce(4);
+
+      // Run first transaction, evaluating graph fully
+      await getCompletion(
+        graph.act(() => {
+          const nodeB = assertDefined(graph.getNode('b'));
+          nodeB.replaceWithAsync(nodeB.dependencies, nodeBCalculate);
+          tracker.observeAll();
+        }),
+      );
+
+      // Start second transaction, replacing a
+      graph.act(() => {
+        assertDefined(graph.getNode('a')).replace([], () => 2);
+      });
+      await tick();
       tracker.resetExpectations();
 
-      const [deferredResultB, firstTransaction] = makeNodeDeferred(graph, 'b');
-
-      // While b is calculating, e in added and observed, causing first transaction to be cancelled
-      const secondTransaction = graph.act(() => {
+      // Third transaction While b is calculating, e in added and observed, causing second transaction to be cancelled
+      const thirdTransaction = graph.act(() => {
         // Add a disconnected node
         graph.addNode('e', [], () => 0);
         tracker.observe(['e']);
       });
 
-      await tick();
+      await expect(getCompletion(thirdTransaction)).resolves.toEqual({ wasCancelled: false });
 
-      assertDefined(deferredResultB).resolve(3);
+      tracker.expectNodeStateChanges({
+        e: { status: NodeStatus.Resolved, value: 0 },
+        b: { status: NodeStatus.Resolved, value: 4 },
+        c: { status: NodeStatus.Resolved, value: 11 },
+      });
 
-      await tick();
-
+      // Ensure that after third transaction, b and c are updated
       tracker.expectObservationBatches([
+        // Third transaction
         [['e', { status: NodeStatus.Resolved, value: 0 }]],
         [
-          ['b', { status: NodeStatus.Resolved, value: 3 }],
-          ['c', { status: NodeStatus.Resolved, value: 7 }],
+          ['b', { status: NodeStatus.Resolved, value: 4 }],
+          ['c', { status: NodeStatus.Resolved, value: 11 }],
         ],
       ]);
-
-      await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
-      await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
     });
   });
 });

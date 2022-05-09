@@ -136,8 +136,7 @@ export class GraphTracker {
     const observedNodeStateDiff: Record<string, NodeState<unknown> | null> = {
       ...omitBy(
         currNodeStates,
-        (value, key) =>
-          !this.lastNodeStates[key] || areStatesEqual(value, this.lastNodeStates[key]),
+        (value, key) => this.lastNodeStates[key] && areStatesEqual(value, this.lastNodeStates[key]),
       ),
       ...fromPairs(
         Object.keys(this.lastNodeStates)
@@ -194,6 +193,9 @@ export class GraphTracker {
     this.currentCalculatedNodes = [];
   }
 
+  /**
+   * Clear all tracked expectations. Often used at the end of test setup code
+   */
   public resetExpectations(): void {
     this.resetObservationBatches();
     this.clearNodeStateChanges();
