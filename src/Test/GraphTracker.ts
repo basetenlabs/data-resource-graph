@@ -5,7 +5,7 @@ import DataNode from '../DataNode/DataNode';
 import { NodeState, Observer } from '../DataNode/NodeTypes';
 import { areStatesEqual } from '../DataNode/utils';
 import Graph from '../Graph/Graph';
-import { BatchFunction, GraphOptions } from '../Graph/options';
+import { BatchFunction } from '../Graph/options';
 import { TransactionResult } from '../Graph/types';
 import { assertDefined } from '../utils/utils';
 import { getNodeStates } from './testUtils';
@@ -30,8 +30,7 @@ export class GraphTracker {
 
   constructor(public readonly graph: Graph) {
     // Inject own observationBatcher. A little hacky
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ((graph as any).options as GraphOptions).observationBatcher = this.batchObservations;
+    graph.options.observationBatcher = this.batchObservations;
     this.lastNodeStates = getNodeStates(graph);
   }
 

@@ -248,13 +248,13 @@ class DataNode<TResult = unknown> {
       return this.commitEvaluation(evaluationInfo.nextState, depStates);
     }
 
-    const currentTransactionId = this.graph.transactionId;
+    const owningTransactionId = this.graph.transactionId;
 
     try {
       // Calculate node
       const value = await this.calculateFunction.fn(...evaluationInfo.depValues);
 
-      if (currentTransactionId !== this.graph.transactionId) {
+      if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
         return false;
       }
@@ -267,7 +267,7 @@ class DataNode<TResult = unknown> {
         depStates,
       );
     } catch (err) {
-      if (currentTransactionId !== this.graph.transactionId) {
+      if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
         return false;
       }
