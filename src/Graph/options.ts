@@ -17,7 +17,6 @@ export interface GraphOptions {
 
   /**
    * Called when there's an error during graph execution. Useful for logging
-   * @param error
    */
   onError(error?: unknown): void;
 }

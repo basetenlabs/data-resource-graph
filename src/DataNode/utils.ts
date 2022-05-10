@@ -24,14 +24,11 @@ export function areArraysEqual<T>(
 export function isErrorStatus(status: NodeStatus): boolean {
   switch (status) {
     case NodeStatus.Unevaluated:
-    case NodeStatus.Pending:
-    case NodeStatus.Running:
     case NodeStatus.Resolved:
       return false;
     case NodeStatus.OwnError:
     case NodeStatus.DependencyError:
     case NodeStatus.CicularDependencyError:
-    case NodeStatus.InternalError:
     case NodeStatus.Deleted:
       return true;
     default:
