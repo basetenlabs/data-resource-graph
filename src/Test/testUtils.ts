@@ -27,7 +27,7 @@ export function mapNodesToIds(val: unknown): unknown {
 
 export function noopObserver(): void {}
 
-export function getNodeStates(g: Graph): Record<string, NodeState<unknown>> {
+export function getNodeStates(g: Graph): Partial<Record<string, NodeState<unknown>>> {
   return Object.fromEntries(
     Array.from(g).map((node): [string, NodeState<unknown>] => [node.id, node.state]),
   );

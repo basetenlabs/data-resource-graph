@@ -39,7 +39,7 @@ export default function dfs(
       return;
     }
 
-    if (result === undefined || result == true) {
+    if (typeof result === 'undefined' || result == true) {
       // Recurse
       stack.push(node);
       (direction === 'forward' ? node.dependents : node.dependencies).forEach(visitHelperer);

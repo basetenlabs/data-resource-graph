@@ -25,7 +25,7 @@ export class GraphTracker {
   private observers: Map<string, Observer<unknown>> = new Map();
   private currentObservationBatches: Observation[][] = [];
   private currentObservationBatch: Observation[] | undefined;
-  private lastNodeStates: Record<string, NodeState<unknown>>;
+  private lastNodeStates: Partial<Record<string, NodeState<unknown>>>;
   private currentCalculatedNodes: string[] = [];
 
   constructor(public readonly graph: Graph) {
@@ -132,11 +132,11 @@ export class GraphTracker {
   public expectNodeStateChanges(expectedChanges: Record<string, NodeState<unknown> | null>): void {
     const currNodeStates = getNodeStates(this.graph);
 
-    const observedNodeStateDiff: Record<string, NodeState<unknown> | null> = {
-      ...omitBy(
-        currNodeStates,
-        (value, key) => this.lastNodeStates[key] && areStatesEqual(value, this.lastNodeStates[key]),
-      ),
+    const observedNodeStateDiff: Partial<Record<string, NodeState<unknown> | null>> = {
+      ...omitBy(currNodeStates, (value, key) => {
+        const lastValue = this.lastNodeStates[key];
+        return lastValue && value && areStatesEqual(value, lastValue);
+      }),
       ...fromPairs(
         Object.keys(this.lastNodeStates)
           .filter((oldNodeId) => !currNodeStates[oldNodeId])

@@ -36,10 +36,7 @@ export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphB
   const graph = new Graph();
 
   function ensureNode(id: string): DataNode<TValue> {
-    return (
-      (graph.getNode(id) as DataNode<TValue>) ??
-      graph.addNode<[], TValue>(id, [], noop as () => TValue)
-    );
+    return (graph.getNode(id) ?? graph.addNode(id, [], noop)) as DataNode<TValue>;
   }
 
   const graphBuilder: GraphBuilder<TValue> = {

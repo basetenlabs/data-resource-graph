@@ -229,7 +229,7 @@ export class GraphTransaction {
             this.doWork();
           },
           (err) => {
-            console.error(err);
+            this.graph.options.onError(err);
           },
         );
       }

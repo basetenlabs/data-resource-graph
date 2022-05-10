@@ -95,8 +95,7 @@ class DataNode<TResult = unknown> {
       try {
         observer(this.state);
       } catch (err) {
-        // TODO: better error handling
-        console.error(err);
+        this.graph.options.onError(err);
       }
     }
     this.pendingObservers.clear();
@@ -198,16 +197,11 @@ class DataNode<TResult = unknown> {
         };
       }
 
-      if (depState.status !== NodeStatus.Resolved) {
-        console.error('DataNode.evalate() called with dependency in unresolved state');
-        return {
-          depStates,
-          shouldEvaluate: false,
-          nextState: {
-            status: NodeStatus.InternalError,
-          },
-        };
-      }
+      assert(
+        depState.status === NodeStatus.Resolved,
+        'DataNode.evalate() called with dependency in unresolved state',
+      );
+
       depValues.push(depState.value);
     }
 
