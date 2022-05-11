@@ -11,7 +11,7 @@ export type ReplaceNodesWithIds<T> = T extends DataNode
  * Deeply replaces node referenced with their IDs for simpler assertions
  */
 export function mapNodesToIds<T>(val: T): ReplaceNodesWithIds<T>;
-export function mapNodesToIds<T extends unknown>(val: T): unknown {
+export function mapNodesToIds<T>(val: T): unknown {
   if (typeof val !== 'object' || val === null) return val;
   if (val instanceof DataNode) return val.id;
   if (val instanceof Map) {
