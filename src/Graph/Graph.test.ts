@@ -1,5 +1,5 @@
 import DataNode from '../DataNode';
-import { NodeStatus } from '../DataNode/types';
+import { NodeStatus } from '../DataNode/NodeState';
 import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
@@ -154,21 +154,21 @@ describe('evaluation', () => {
     tracker.resetExpectations();
 
     // Act
-    graph.act(() => {
+    graph.act(() =>
       // Replace value of c
       graph.getNode('c')?.replace([], () => {
-        throw new Error();
-      });
-    });
+        throw 'Error!';
+      }),
+    );
 
     // Assert
     tracker.expectNodeStateChanges({
-      c: { status: NodeStatus.OwnError },
-      e: { status: NodeStatus.DependencyError },
-      f: { status: NodeStatus.DependencyError },
-      g: { status: NodeStatus.DependencyError },
-      h: { status: NodeStatus.DependencyError },
-      i: { status: NodeStatus.DependencyError },
+      c: { status: NodeStatus.OwnError, error: 'Error!' },
+      e: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c'] },
+      f: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c'] },
+      g: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c', 'e'] },
+      h: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c', 'e'] },
+      i: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c', 'e'] },
     });
   });
 
@@ -695,13 +695,14 @@ describe('evaluation', () => {
       tracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
 
       // Resolve B, which resolves C
-      deferredResultB.reject(new Error('Error!'));
+      const error = new Error('Error!');
+      deferredResultB.reject(error);
 
       await tick();
 
       tracker.expectObservationBatch([
-        ['b', { status: NodeStatus.OwnError }],
-        ['c', { status: NodeStatus.DependencyError }],
+        ['b', { status: NodeStatus.OwnError, error }],
+        ['c', { status: NodeStatus.DependencyError, error, path: ['b'] }],
       ]);
 
       await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
@@ -729,7 +730,7 @@ describe('evaluation', () => {
 });
 
 describe('delete nodes', () => {
-  it('deletes middle node', () => {
+  it('deletes first node', () => {
     // Arrange
     const graph = TestGraphs.makeMediumAcylic();
     const tracker = new GraphTracker(graph);
@@ -738,14 +739,16 @@ describe('delete nodes', () => {
 
     // Act
     graph.act(() => {
-      graph.getNode('d')?.delete();
+      graph.getNode('b')?.delete();
     });
 
     // Assert
     tracker.expectNodeStateChanges({
-      e: { status: NodeStatus.DependencyError },
-      // d deleted
-      d: null,
+      c: { status: NodeStatus.MissingDependencyError, path: ['b'] },
+      d: { status: NodeStatus.MissingDependencyError, path: ['b'] },
+      e: { status: NodeStatus.MissingDependencyError, path: ['b', 'd'] },
+      // b deleted
+      b: null,
     });
   });
 
