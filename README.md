@@ -18,7 +18,7 @@ An evaluator for complex data dependency graphs. Data Resource Graph provides th
 
 ## Main concepts
 
-Each `Graph` is a collection of one or more `DataNode`s. Each `DataNode` (or informally each _node_) has a list of nodes it depends on a **calculate function**. The calculate function takes the value of each dependency and returns a result from it. At least one node in the graph should have an empty list of dependencies, or else there would be a cycle. You can think of the graph like a spreadsheet, with cells (nodes) consisting of values and formulas which reference other cells.
+Each `Graph` is a collection of one or more `DataNode`s. Each `DataNode` (or informally each _node_) has a list of nodes it depends on and a **calculate function**. The calculate function takes the value of each dependency and returns a result from it. At least one node in the graph should have an empty list of dependencies, or else there would be a cycle. You can think of the graph like a spreadsheet, with cells (nodes) consisting of values and formulas which reference other cells.
 
 **Observers** are functions that listen to particular nodes and get called whenever the node's value changes.
 
