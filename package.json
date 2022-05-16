@@ -12,7 +12,7 @@
   "scripts": {
     "lint": "eslint src/ --ext .js,.jsx,.ts,.tsx",
     "test": "jest",
-    "clean": "rm -rf lib build package dist",
+    "clean": "rm -rf lib es",
     "ts-node": "ts-node",
     "docs": "typedoc --entryPoints src/main.ts",
     "build": "tsc",
