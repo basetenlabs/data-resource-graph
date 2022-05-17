@@ -1,5 +1,5 @@
 import DataNode from '../DataNode';
-import { NodeStatus } from '../DataNode/types';
+import { NodeStatus } from '../DataNode/NodeState';
 import assert from '../utils/assert';
 import { Deferred } from '../utils/Deferred';
 import { assertRunOnce, someIterable, takeFromSet, takeFromSetIf } from '../utils/utils';
@@ -229,7 +229,7 @@ export class GraphTransaction {
             this.doWork();
           },
           (err) => {
-            console.error(err);
+            this.graph.options.onError(err);
           },
         );
       }

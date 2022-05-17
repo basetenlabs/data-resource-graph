@@ -1,16 +1,19 @@
 import fromPairs from 'lodash/fromPairs';
+import mapValues from 'lodash/mapValues';
 import omitBy from 'lodash/omitBy';
 import DataNode from '../DataNode';
-import { NodeState, Observer } from '../DataNode/types';
+import { NodeState } from '../DataNode/NodeState';
+import { Observer } from '../DataNode/types';
 import { areStatesEqual } from '../DataNode/utils';
 import Graph from '../Graph';
 import { BatchFunction } from '../Graph/options';
 import { TransactionResult } from '../Graph/types';
 import assert from '../utils/assert';
 import { assertDefined } from '../utils/utils';
-import { getNodeStates } from './testUtils';
+import { FlattenedNodeState, getNodeStates, mapNodesToIds, ReplaceNodesWithIds } from './testUtils';
 
 type Observation = [nodeId: string, state: NodeState<unknown>];
+type FlattenedObservation = ReplaceNodesWithIds<Observation>;
 
 const spiedOnFlag = Symbol('spiedOn');
 
@@ -25,7 +28,7 @@ export class GraphTracker {
   private observers: Map<string, Observer<unknown>> = new Map();
   private currentObservationBatches: Observation[][] = [];
   private currentObservationBatch: Observation[] | undefined;
-  private lastNodeStates: Record<string, NodeState<unknown>>;
+  private lastNodeStates: Partial<Record<string, NodeState<unknown>>>;
   private currentCalculatedNodes: string[] = [];
 
   constructor(public readonly graph: Graph) {
@@ -108,12 +111,12 @@ export class GraphTracker {
    * Asserts that the observation batches (meaning the lists of synchronous observer calls) since the last time
    * `expectObservationBatches` was called match the passed in expectedBatches.
    */
-  public expectObservationBatches(expectedBatches: Observation[][]): void {
-    expect(this.currentObservationBatches).toEqual(expectedBatches);
+  public expectObservationBatches(expectedBatches: FlattenedObservation[][]): void {
+    expect(mapNodesToIds(this.currentObservationBatches)).toEqual(expectedBatches);
     this.resetObservationBatches();
   }
 
-  public expectObservationBatch(expectedBatch: Observation[]): void {
+  public expectObservationBatch(expectedBatch: FlattenedObservation[]): void {
     this.expectObservationBatches([expectedBatch]);
   }
 
@@ -129,20 +132,23 @@ export class GraphTracker {
    * (or `GraphTracker` construction if this is the first call) matches the parameter.
    * @param expectedChanges - A partial mapping of nodes to node states and checks
    */
-  public expectNodeStateChanges(expectedChanges: Record<string, NodeState<unknown> | null>): void {
+  public expectNodeStateChanges(expectedChanges: Record<string, FlattenedNodeState | null>): void {
     const currNodeStates = getNodeStates(this.graph);
 
-    const observedNodeStateDiff: Record<string, NodeState<unknown> | null> = {
-      ...omitBy(
-        currNodeStates,
-        (value, key) => this.lastNodeStates[key] && areStatesEqual(value, this.lastNodeStates[key]),
-      ),
-      ...fromPairs(
-        Object.keys(this.lastNodeStates)
-          .filter((oldNodeId) => !currNodeStates[oldNodeId])
-          .map((key) => [key, null]),
-      ),
-    };
+    const observedNodeStateDiff: Partial<Record<string, FlattenedNodeState | null>> = mapValues(
+      {
+        ...omitBy(currNodeStates, (value, key) => {
+          const lastValue = this.lastNodeStates[key];
+          return lastValue && value && areStatesEqual(value, lastValue);
+        }),
+        ...fromPairs(
+          Object.keys(this.lastNodeStates)
+            .filter((oldNodeId) => !currNodeStates[oldNodeId])
+            .map((key) => [key, null]),
+        ),
+      },
+      mapNodesToIds,
+    );
 
     expect(observedNodeStateDiff).toEqual(expectedChanges);
     this.lastNodeStates = currNodeStates;

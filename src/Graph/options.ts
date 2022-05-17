@@ -14,10 +14,18 @@ export interface GraphOptions {
    * If you're rendering data in React, this should probably be React's `batch()` function.
    */
   observationBatcher: BatchFunction;
+
+  /**
+   * Called when there's an error during graph execution. Useful for logging
+   */
+  onError(error?: unknown): void;
 }
 
 const defaultBatchFunction: BatchFunction = (callback) => callback();
 
 export const defaultOptions: GraphOptions = {
   observationBatcher: defaultBatchFunction,
+  onError(err) {
+    console.error(err);
+  },
 };

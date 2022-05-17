@@ -2,8 +2,9 @@ import Graph from '../Graph';
 import dfs from '../Graph/dfs';
 import assert from '../utils/assert';
 import { shallowEquals } from '../utils/utils';
-import { CalculateFunction, DataNodesOf, NodeState, NodeStatus, Observer } from './types';
-import { areArraysEqual, areStatesEqual, isErrorStatus } from './utils';
+import { NodeState, NodeStatus } from './NodeState';
+import { CalculateFunction, DataNodesOf, Observer } from './types';
+import { areArraysEqual, areStatesEqual } from './utils';
 
 interface EvaluationData<TResult> {
   dependencies: DataNode[];
@@ -95,8 +96,7 @@ class DataNode<TResult = unknown> {
       try {
         observer(this.state);
       } catch (err) {
-        // TODO: better error handling
-        console.error(err);
+        this.graph.options.onError(err);
       }
     }
     this.pendingObservers.clear();
@@ -185,29 +185,47 @@ class DataNode<TResult = unknown> {
     const depValues: unknown[] = [];
 
     // Build dependency values
-    for (const depState of depStates) {
-      // Is dependency in an errored state?
+    for (const dep of this.dependencies) {
+      const depState = dep.state;
 
-      if (isErrorStatus(depState.status)) {
+      // Is dependency in an errored state?
+      if (
+        depState.status === NodeStatus.OwnError ||
+        depState.status === NodeStatus.DependencyError
+      ) {
         return {
           depStates,
           shouldEvaluate: false,
           nextState: {
             status: NodeStatus.DependencyError,
+            path: [...(depState.status === NodeStatus.DependencyError ? depState.path : []), dep],
+            error: depState.error,
           },
         };
       }
 
-      if (depState.status !== NodeStatus.Resolved) {
-        console.error('DataNode.evalate() called with dependency in unresolved state');
+      if (
+        depState.status === NodeStatus.Deleted ||
+        depState.status === NodeStatus.MissingDependencyError
+      ) {
         return {
           depStates,
           shouldEvaluate: false,
           nextState: {
-            status: NodeStatus.InternalError,
+            status: NodeStatus.MissingDependencyError,
+            path: [
+              ...(depState.status === NodeStatus.MissingDependencyError ? depState.path : []),
+              dep,
+            ],
           },
         };
       }
+
+      assert(
+        depState.status === NodeStatus.Resolved,
+        'DataNode.evalate() called with dependency in unresolved state',
+      );
+
       depValues.push(depState.value);
     }
 
@@ -261,10 +279,11 @@ class DataNode<TResult = unknown> {
         },
         depStates,
       );
-    } catch (err) {
+    } catch (error) {
       return this.commitEvaluation(
         {
           status: NodeStatus.OwnError,
+          error,
         },
         depStates,
       );
@@ -302,7 +321,7 @@ class DataNode<TResult = unknown> {
         },
         depStates,
       );
-    } catch (err) {
+    } catch (error) {
       if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
         return;
@@ -310,6 +329,7 @@ class DataNode<TResult = unknown> {
       return this.commitEvaluation(
         {
           status: NodeStatus.OwnError,
+          error,
         },
         depStates,
       );

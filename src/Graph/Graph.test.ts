@@ -1,5 +1,5 @@
 import DataNode from '../DataNode';
-import { NodeStatus } from '../DataNode/types';
+import { NodeStatus } from '../DataNode/NodeState';
 import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
@@ -154,21 +154,21 @@ describe('evaluation', () => {
     tracker.resetExpectations();
 
     // Act
-    graph.act(() => {
+    graph.act(() =>
       // Replace value of c
       graph.getNode('c')?.replace([], () => {
-        throw new Error();
-      });
-    });
+        throw 'Error!';
+      }),
+    );
 
     // Assert
     tracker.expectNodeStateChanges({
-      c: { status: NodeStatus.OwnError },
-      e: { status: NodeStatus.DependencyError },
-      f: { status: NodeStatus.DependencyError },
-      g: { status: NodeStatus.DependencyError },
-      h: { status: NodeStatus.DependencyError },
-      i: { status: NodeStatus.DependencyError },
+      c: { status: NodeStatus.OwnError, error: 'Error!' },
+      e: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c'] },
+      f: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c'] },
+      g: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c', 'e'] },
+      h: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c', 'e'] },
+      i: { status: NodeStatus.DependencyError, error: 'Error!', path: ['c', 'e'] },
     });
   });
 
@@ -377,6 +377,18 @@ describe('evaluation', () => {
       await Promise.resolve();
     }
 
+    function makeNodeAsync(
+      graph: Graph,
+      nodeId: string,
+      calculate: (...args: unknown[]) => Promise<unknown>,
+    ): TransactionResult | undefined {
+      return graph.act(() => {
+        const node = assertDefined(graph.getNode(nodeId));
+
+        node.replaceWithAsync<unknown[]>(node.dependencies, calculate);
+      });
+    }
+
     /**
      * Replace a data node with an async function
      * @returns a tuple with the deferred object and a transaction result. The deferred promise may
@@ -388,15 +400,12 @@ describe('evaluation', () => {
       nodeId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ): [Deferred<((...deps: any[]) => unknown) | unknown>, TransactionResult | undefined] {
-      const node = assertDefined(graph.getNode(nodeId));
       const deferredResult = new Deferred<((...deps: unknown[]) => unknown) | unknown>();
 
-      const transactionResult = graph.act(() =>
-        node.replaceWithAsync<unknown[]>(node.dependencies, async (...deps) => {
-          const result = await deferredResult.promise;
-          return typeof result === 'function' ? result(...deps) : result;
-        }),
-      );
+      const transactionResult = makeNodeAsync(graph, nodeId, async (...deps) => {
+        const result = await deferredResult.promise;
+        return typeof result === 'function' ? result(...deps) : result;
+      });
 
       return [deferredResult, transactionResult];
     }
@@ -579,20 +588,21 @@ describe('evaluation', () => {
       const graph = TestGraphs.makeSmallChain();
       const tracker = new GraphTracker(graph);
 
-      const nodeBCalculate = jest
-        .fn()
-        // First calculate returns 3
-        .mockResolvedValueOnce(3)
-        // second calculate returns a promise that never resolves
-        .mockReturnValueOnce(new Promise(() => {}))
-        // Third calculate returns 4
-        .mockResolvedValueOnce(4);
-
       // Run first transaction, evaluating graph fully
       await getCompletion(
         graph.act(() => {
-          const nodeB = assertDefined(graph.getNode('b'));
-          nodeB.replaceWithAsync(nodeB.dependencies, nodeBCalculate);
+          makeNodeAsync(
+            graph,
+            'b',
+            jest
+              .fn()
+              // First calculate returns 3
+              .mockResolvedValueOnce(3)
+              // second calculate returns a promise that never resolves
+              .mockReturnValueOnce(new Promise(() => {}))
+              // Third calculate returns 4
+              .mockResolvedValueOnce(4),
+          );
           tracker.observeAll();
         }),
       );
@@ -629,11 +639,98 @@ describe('evaluation', () => {
         ],
       ]);
     });
+
+    it("does't reexecute async node if dependency invalidated", async () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+      await getCompletion(
+        graph.act(() => {
+          makeNodeAsync(graph, 'b', async (a: unknown) => (a as number) + 2);
+          tracker.observeAll();
+          tracker.spyOnCalculates();
+        }),
+      );
+      tracker.resetExpectations();
+
+      // Act: invalidate node a
+      await getCompletion(graph.act(() => assertDefined(graph.getNode('a')).invalidate()));
+
+      // Assert
+      // Only a, not b, recalculated
+      tracker.expectToHaveCalculated(['a']);
+    });
+
+    it("Runs sync if recalculation graph doesn't contain async nodes", async () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+      await getCompletion(
+        graph.act(() => {
+          makeNodeAsync(graph, 'b', async (a: unknown) => (a as number) + 2);
+          tracker.observeAll();
+          tracker.spyOnCalculates();
+        }),
+      );
+      tracker.resetExpectations();
+
+      // Act: invalidate node a
+      const transactionResult = graph.act(() => assertDefined(graph.getNode('c')).invalidate());
+
+      // Assert: Transaction in synchronous and only c recalculated
+      expect(transactionResult).toEqual(syncTransactionResult);
+      tracker.expectToHaveCalculated(['c']);
+    });
+
+    it('async node rejects with error', async () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const [deferredResultB] = makeNodeDeferred(graph, 'b');
+      const tracker = new GraphTracker(graph);
+
+      // Act: Observe all nodes
+      const completionPromise = getCompletion(tracker.observeAll());
+
+      // Assert
+      tracker.expectObservationBatch([['a', { status: NodeStatus.Resolved, value: 1 }]]);
+
+      // Resolve B, which resolves C
+      const error = new Error('Error!');
+      deferredResultB.reject(error);
+
+      await tick();
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.OwnError, error }],
+        ['c', { status: NodeStatus.DependencyError, error, path: ['b'] }],
+      ]);
+
+      await expect(completionPromise).resolves.toEqual({ wasCancelled: false });
+    });
+
+    it('chained async using addAsyncNode()', async () => {
+      const graph = new Graph();
+      graph.act(() => {
+        const nodeA = graph.addAsyncNode('a', [], async () => 1);
+        graph.addAsyncNode('b', [nodeA], async (a) => a + 3);
+      });
+
+      const tracker = new GraphTracker(graph);
+      tracker.spyOnCalculates();
+
+      // Observe all nodes
+      await getCompletion(tracker.observeAll());
+
+      tracker.expectObservationBatches([
+        [['a', { status: NodeStatus.Resolved, value: 1 }]],
+        [['b', { status: NodeStatus.Resolved, value: 4 }]],
+      ]);
+    });
   });
 });
 
 describe('delete nodes', () => {
-  it('deletes middle node', () => {
+  it('deletes first node', () => {
     // Arrange
     const graph = TestGraphs.makeMediumAcylic();
     const tracker = new GraphTracker(graph);
@@ -642,14 +739,16 @@ describe('delete nodes', () => {
 
     // Act
     graph.act(() => {
-      graph.getNode('d')?.delete();
+      graph.getNode('b')?.delete();
     });
 
     // Assert
     tracker.expectNodeStateChanges({
-      e: { status: NodeStatus.DependencyError },
-      // d deleted
-      d: null,
+      c: { status: NodeStatus.MissingDependencyError, path: ['b'] },
+      d: { status: NodeStatus.MissingDependencyError, path: ['b'] },
+      e: { status: NodeStatus.MissingDependencyError, path: ['b', 'd'] },
+      // b deleted
+      b: null,
     });
   });
 
@@ -694,6 +793,27 @@ describe('delete nodes', () => {
       d: null, // d deleted
       e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.08) },
     });
+  });
+
+  it('deletes middle node', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    const nodeD = assertDefined(graph.getNode('d'));
+    graph.act(() => nodeD.delete());
+
+    expect(() => graph.act(() => nodeD.replace([], () => 1))).toThrowError(
+      'Operation on deleted node',
+    );
+  });
+
+  it('Must delete node inside transaction', () => {
+    // Arrange
+    const graph = TestGraphs.makeMediumAcylic();
+    const nodeD = assertDefined(graph.getNode('d'));
+
+    expect(() => nodeD.delete()).toThrowError(
+      'DataNode.delete() must be called inside a transaction',
+    );
   });
 });
 
@@ -789,5 +909,37 @@ describe('observers', () => {
     graph.act(() => nodeC.addObserver(observer));
 
     expect(observer.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+  });
+
+  it('Calls second observer after first throws', () => {
+    const observer2 = jest.fn();
+
+    const graph = TestGraphs.makeSmallChain();
+    graph.options.onError = jest.fn().mockImplementationOnce((err) => {
+      expect(err?.message).toBe('Fail');
+      // Make sure observer2 is called after the error
+      expect(observer2).not.toHaveBeenCalled();
+    });
+    const nodeC = assertDefined(graph.getNode('c'));
+
+    graph.act(() => {
+      nodeC.addObserver(() => {
+        throw new Error('Fail');
+      });
+
+      nodeC.addObserver(observer2);
+    });
+
+    expect(graph.options.onError).toHaveBeenCalledTimes(1);
+    expect(observer2).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('addNode', () => {
+  it('fails trying to add duplicate node', () => {
+    const graph = TestGraphs.makeSmallAcyclic();
+    expect(() => graph.act(() => graph.addNode('a', [], () => 1))).toThrowError(
+      'Node with id a already exists',
+    );
   });
 });
