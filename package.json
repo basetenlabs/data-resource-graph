@@ -1,11 +1,16 @@
 {
   "name": "data-resource-graph",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "An evaluator for complex data dependency graphs",
   "author": "BaseTen",
   "repository": "https://github.com/baseten/data-resource-graph",
   "license": "MIT",
-  "keywords": ["data", "resource", "dependency", "solver"],
+  "keywords": [
+    "data",
+    "resource",
+    "dependency",
+    "solver"
+  ],
   "main": "./lib/index.js",
   "module": "./es/index.js",
   "types": "./types.d.ts",
