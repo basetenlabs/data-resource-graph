@@ -221,6 +221,16 @@ class DataNode<TResult = unknown> {
         };
       }
 
+      if (depState.status === NodeStatus.CicularDependencyError) {
+        return {
+          depStates,
+          shouldEvaluate: false,
+          nextState: {
+            status: NodeStatus.CicularDependencyError,
+          },
+        };
+      }
+
       assert(
         depState.status === NodeStatus.Resolved,
         'DataNode.evalate() called with dependency in unresolved state',
@@ -366,6 +376,23 @@ class DataNode<TResult = unknown> {
 
   public isAsync(): boolean {
     return !this.calculateFunction.sync;
+  }
+
+  /**
+   * @internal
+   * @returns whether to notify observers
+   */
+  public setCircularDependencyError(): boolean {
+    const oldState = this.state;
+    this.state = { status: NodeStatus.CicularDependencyError };
+    if (!areStatesEqual(oldState, this.state)) {
+      // Need to notify
+      for (const observer of this.observers) {
+        this.pendingObservers.add(observer);
+      }
+      return true;
+    }
+    return false;
   }
 }
 

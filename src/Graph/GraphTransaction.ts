@@ -66,6 +66,7 @@ export class GraphTransaction {
     const unevaluated = new Set<DataNode>();
     // Nodes observed either directly or indirectly
     const observedSet = new Set<DataNode>();
+    const newCycleNodes = new Set<DataNode>();
 
     // Traverse observed subgraph looking for unevaluated nodes and detecting cycles
     // TODO Future optimization: whether or not each node is directly or indirectly observed can be cached
@@ -80,7 +81,14 @@ export class GraphTransaction {
           // Found cycle, set error on all cycle nodes
           const cycle = stack.slice(priorNodeIndex);
           for (const cycleNode of cycle) {
-            cycleNode.state = { status: NodeStatus.CicularDependencyError };
+            const wasCycleNode = cycleNode.state.status === NodeStatus.CicularDependencyError;
+            const shouldNotify = cycleNode.setCircularDependencyError();
+            if (shouldNotify) {
+              this.notificationQueue.add(cycleNode);
+            }
+            if (!wasCycleNode) {
+              newCycleNodes.add(cycleNode);
+            }
             // Remove cycle nodes from unevaluated
             unevaluated.delete(cycleNode);
           }
@@ -102,6 +110,18 @@ export class GraphTransaction {
         }
       },
       'backward',
+    );
+
+    // Mark downstream dependents of new cycle nodes as unevaluated so they can be marked as errored
+    dfs(
+      Array.from(newCycleNodes),
+      (node) => {
+        // direct dependent of new cycle node
+        if (node.state.status !== NodeStatus.CicularDependencyError) {
+          unevaluated.add(node);
+        }
+      },
+      'forward',
     );
 
     // Traverse forwards, recursively making nodes as unevaluated

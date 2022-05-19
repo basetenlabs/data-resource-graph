@@ -288,6 +288,46 @@ describe('evaluation', () => {
         e: { status: NodeStatus.CicularDependencyError },
       });
     });
+
+    it('notifies effected nodes when cycle formed', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        const nodeA = assertDefined(graph.getNode('a'));
+        const nodeB = assertDefined(graph.getNode('b')) as DataNode<number>;
+
+        nodeA.replace([nodeB], (b: number) => b + 1);
+      });
+
+      tracker.expectObservationBatch([
+        ['a', { status: NodeStatus.CicularDependencyError }],
+        ['b', { status: NodeStatus.CicularDependencyError }],
+        ['c', { status: NodeStatus.CicularDependencyError }],
+      ]);
+    });
+
+    it('node added downstream of cycle enters error state', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallSelfCycle();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        const nodeA = assertDefined(graph.getNode('a'));
+
+        const nodeC = graph.addNode('c', [nodeA], (a) => a);
+        tracker.observe([nodeC]);
+      });
+
+      tracker.expectObservationBatch([['c', { status: NodeStatus.CicularDependencyError }]]);
+    });
   });
 
   describe('partial evaluation', () => {
