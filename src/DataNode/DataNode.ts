@@ -221,16 +221,6 @@ class DataNode<TResult = unknown> {
         };
       }
 
-      if (depState.status === NodeStatus.CicularDependencyError) {
-        return {
-          depStates,
-          shouldEvaluate: false,
-          nextState: {
-            status: NodeStatus.CicularDependencyError,
-          },
-        };
-      }
-
       assert(
         depState.status === NodeStatus.Resolved,
         'DataNode.evalate() called with dependency in unresolved state',

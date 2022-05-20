@@ -312,7 +312,7 @@ describe('evaluation', () => {
       ]);
     });
 
-    it('node added downstream of cycle enters error state', () => {
+    it.only('node added downstream of cycle enters error state', () => {
       // Arrange
       const graph = TestGraphs.makeSmallSelfCycle();
       const tracker = new GraphTracker(graph);

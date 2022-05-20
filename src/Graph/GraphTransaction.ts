@@ -74,6 +74,16 @@ export class GraphTransaction {
       (node) => node.state.status === NodeStatus.CicularDependencyError,
     );
 
+    const handleCycleNode = (cycleNode: DataNode) => {
+      const shouldNotify = cycleNode.setCircularDependencyError();
+      if (shouldNotify) {
+        this.notificationQueue.add(cycleNode);
+      }
+      cyclesNodes.add(cycleNode);
+      // Remove cycle nodes from unevaluated
+      unevaluated.delete(cycleNode);
+    };
+
     // Traverse observed subgraph looking for unevaluated nodes and detecting cycles
     // TODO Future optimization: whether or not each node is directly or indirectly observed can be cached
     // based on the set of observed nodes and graph topology
@@ -86,15 +96,7 @@ export class GraphTransaction {
         if (priorNodeIndex >= 0) {
           // Found cycle, set error on all cycle nodes
           const cycle = stack.slice(priorNodeIndex);
-          for (const cycleNode of cycle) {
-            const shouldNotify = cycleNode.setCircularDependencyError();
-            if (shouldNotify) {
-              this.notificationQueue.add(cycleNode);
-            }
-            cyclesNodes.add(cycleNode);
-            // Remove cycle nodes from unevaluated
-            unevaluated.delete(cycleNode);
-          }
+          cycle.forEach(handleCycleNode);
 
           return;
         }
@@ -116,18 +118,7 @@ export class GraphTransaction {
     );
 
     // Mark dependents of cycle nodes as cycle nodes
-    dfs(
-      Array.from(cyclesNodes),
-      (node) => {
-        cyclesNodes.add(node);
-        // direct dependent of new cycle node
-        const shouldNotify = node.setCircularDependencyError();
-        if (shouldNotify) {
-          this.notificationQueue.add(node);
-        }
-      },
-      'forward',
-    );
+    dfs(Array.from(cyclesNodes), handleCycleNode, 'forward');
 
     // Mark nodes that are no longer cycle nodes as unevaluated
     for (const node of prevCycleNodes.filter((node) => !cyclesNodes.has(node))) {
