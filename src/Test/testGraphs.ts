@@ -57,6 +57,16 @@ const testGraphs = {
         .addNode('e', ['a']),
     ).graph,
 
+  makeSmallCycleWithDownstreams: () =>
+    graphBuilder(0).act((builder) =>
+      builder
+        .addNode('a', ['b'], (b) => b + 1)
+        .addNode('b', ['a'], (a) => a + 1)
+        .addNode('c', ['a'], (a) => a + 2)
+        .addNode('d', ['c'], (c) => c + 3)
+        .addNode('e', ['b'], (b) => b + 4),
+    ).graph,
+
   makeMediumDAG: () =>
     graphBuilder().act((builder) =>
       builder

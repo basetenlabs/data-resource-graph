@@ -1,5 +1,6 @@
 import DataNode from '../DataNode';
 import { NodeStatus } from '../DataNode/NodeState';
+import { graphBuilder } from '../Test/graphBuilder';
 import { GraphTracker } from '../Test/GraphTracker';
 import TestGraphs from '../Test/testGraphs';
 import '../Test/testTypes';
@@ -327,6 +328,53 @@ describe('evaluation', () => {
       });
 
       tracker.expectObservationBatch([['c', { status: NodeStatus.CicularDependencyError }]]);
+    });
+
+    it('recalculates downstream nodes when cycle broken', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallCycleWithDownstreams();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        graph.getNode('b')?.replace([], () => 0);
+      });
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 0 }],
+        ['a', { status: NodeStatus.Resolved, value: 1 }],
+        ['e', { status: NodeStatus.Resolved, value: 4 }],
+        ['c', { status: NodeStatus.Resolved, value: 3 }],
+        ['d', { status: NodeStatus.Resolved, value: 6 }],
+      ]);
+    });
+
+    it('recalculates when cycle broken and node deleted', () => {
+      // Arrange
+      const graph = graphBuilder(0).act((graph) =>
+        graph
+          .addNode('a', ['c'], (c) => c + 1)
+          .addNode('b', ['d'], (d) => d + 2)
+          .addNode('c', ['b'], (b) => b + 3)
+          .addNode('d', ['a'], (a) => a + 4),
+      ).graph;
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        assertDefined(graph.getNode('d')).delete();
+        assertDefined(graph.getNode('b')).replace([], () => 0);
+      });
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 0 }],
+        ['c', { status: NodeStatus.Resolved, value: 3 }],
+        ['a', { status: NodeStatus.Resolved, value: 4 }],
+      ]);
     });
   });
 

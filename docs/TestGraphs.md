@@ -95,6 +95,21 @@ flowchart LR
   e --> d
 ```
 
+## SmallCycleWithDependencies
+```mermaid
+flowchart LR
+  b(b)
+  b --> a
+  b --> e
+  a(a)
+  a --> b
+  a --> c
+  c(c)
+  c --> d
+  d(d)
+  e(e)
+```
+
 ## MediumDAG
 ```mermaid
 flowchart LR
