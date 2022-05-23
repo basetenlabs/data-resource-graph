@@ -95,7 +95,7 @@ flowchart LR
   e --> d
 ```
 
-## SmallCycleWithDependencies
+## SmallCycleWithDownstreams
 ```mermaid
 flowchart LR
   b(b)

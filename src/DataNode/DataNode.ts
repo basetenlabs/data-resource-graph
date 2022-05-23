@@ -375,6 +375,8 @@ class DataNode<TResult = unknown> {
   public setCircularDependencyError(): boolean {
     const oldState = this.state;
     this.state = { status: NodeStatus.CicularDependencyError };
+    // This node is no longer in an evaluable state
+    this.lastEvaluation = undefined;
     if (!areStatesEqual(oldState, this.state)) {
       // Need to notify
       for (const observer of this.observers) {

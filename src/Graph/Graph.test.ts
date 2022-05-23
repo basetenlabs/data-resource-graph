@@ -2,7 +2,7 @@ import DataNode from '../DataNode';
 import { NodeStatus } from '../DataNode/NodeState';
 import { graphBuilder } from '../Test/graphBuilder';
 import { GraphTracker } from '../Test/GraphTracker';
-import TestGraphs from '../Test/testGraphs';
+import { default as testGraphs, default as TestGraphs } from '../Test/testGraphs';
 import '../Test/testTypes';
 import { noopObserver } from '../Test/testUtils';
 import assert from '../utils/assert';
@@ -312,7 +312,7 @@ describe('evaluation', () => {
       ]);
     });
 
-    it.only('node added downstream of cycle enters error state', () => {
+    it('node added downstream of cycle enters error state', () => {
       // Arrange
       const graph = TestGraphs.makeSmallSelfCycle();
       const tracker = new GraphTracker(graph);
@@ -446,6 +446,31 @@ describe('evaluation', () => {
         d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.26) },
         e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
         g: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.17) },
+      });
+    });
+
+    it('correctly evaluates after reverts to pre-cycle state', () => {
+      // Arrange
+      const graph = testGraphs.makeSmallChevron();
+      const tracker = new GraphTracker(graph);
+      const nodeA = assertDefined(graph.getNode('a'));
+      const nodeC = assertDefined(graph.getNode('c')) as DataNode<number>;
+      // Evaluate once before cycle
+      tracker.observeAll();
+      // Create cycle and evaluate
+      graph.act(() => nodeA.replace([nodeC], (c) => 1 + c));
+      tracker.resetExpectations();
+
+      // Act
+      // Revert to pre-cycle graph
+      graph.act(() => {
+        nodeA.replace([], () => 1);
+      });
+
+      // Assert
+      tracker.expectNodeStateChanges({
+        a: { status: NodeStatus.Resolved, value: 1 },
+        c: { status: NodeStatus.Resolved, value: 3 },
       });
     });
   });
