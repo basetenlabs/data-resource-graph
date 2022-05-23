@@ -1,7 +1,8 @@
 import DataNode from '../DataNode';
 import { NodeStatus } from '../DataNode/NodeState';
+import { graphBuilder } from '../Test/graphBuilder';
 import { GraphTracker } from '../Test/GraphTracker';
-import TestGraphs from '../Test/testGraphs';
+import { default as testGraphs, default as TestGraphs } from '../Test/testGraphs';
 import '../Test/testTypes';
 import { noopObserver } from '../Test/testUtils';
 import assert from '../utils/assert';
@@ -288,6 +289,93 @@ describe('evaluation', () => {
         e: { status: NodeStatus.CicularDependencyError },
       });
     });
+
+    it('notifies effected nodes when cycle formed', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        const nodeA = assertDefined(graph.getNode('a'));
+        const nodeB = assertDefined(graph.getNode('b')) as DataNode<number>;
+
+        nodeA.replace([nodeB], (b: number) => b + 1);
+      });
+
+      tracker.expectObservationBatch([
+        ['a', { status: NodeStatus.CicularDependencyError }],
+        ['b', { status: NodeStatus.CicularDependencyError }],
+        ['c', { status: NodeStatus.CicularDependencyError }],
+      ]);
+    });
+
+    it('node added downstream of cycle enters error state', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallSelfCycle();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        const nodeA = assertDefined(graph.getNode('a'));
+
+        const nodeC = graph.addNode('c', [nodeA], (a) => a);
+        tracker.observe([nodeC]);
+      });
+
+      tracker.expectObservationBatch([['c', { status: NodeStatus.CicularDependencyError }]]);
+    });
+
+    it('recalculates downstream nodes when cycle broken', () => {
+      // Arrange
+      const graph = TestGraphs.makeSmallCycleWithDownstreams();
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        graph.getNode('b')?.replace([], () => 0);
+      });
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 0 }],
+        ['a', { status: NodeStatus.Resolved, value: 1 }],
+        ['e', { status: NodeStatus.Resolved, value: 4 }],
+        ['c', { status: NodeStatus.Resolved, value: 3 }],
+        ['d', { status: NodeStatus.Resolved, value: 6 }],
+      ]);
+    });
+
+    it('recalculates when cycle broken and node deleted', () => {
+      // Arrange
+      const graph = graphBuilder(0).act((graph) =>
+        graph
+          .addNode('a', ['c'], (c) => c + 1)
+          .addNode('b', ['d'], (d) => d + 2)
+          .addNode('c', ['b'], (b) => b + 3)
+          .addNode('d', ['a'], (a) => a + 4),
+      ).graph;
+      const tracker = new GraphTracker(graph);
+      tracker.observeAll();
+      tracker.resetExpectations();
+
+      // Act
+      graph.act(() => {
+        assertDefined(graph.getNode('d')).delete();
+        assertDefined(graph.getNode('b')).replace([], () => 0);
+      });
+
+      tracker.expectObservationBatch([
+        ['b', { status: NodeStatus.Resolved, value: 0 }],
+        ['c', { status: NodeStatus.Resolved, value: 3 }],
+        ['a', { status: NodeStatus.Resolved, value: 4 }],
+      ]);
+    });
   });
 
   describe('partial evaluation', () => {
@@ -358,6 +446,31 @@ describe('evaluation', () => {
         d: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.26) },
         e: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.16) },
         g: { status: NodeStatus.Resolved, value: expect.closeTo2(-0.17) },
+      });
+    });
+
+    it('correctly evaluates after reverts to pre-cycle state', () => {
+      // Arrange
+      const graph = testGraphs.makeSmallChevron();
+      const tracker = new GraphTracker(graph);
+      const nodeA = assertDefined(graph.getNode('a'));
+      const nodeC = assertDefined(graph.getNode('c')) as DataNode<number>;
+      // Evaluate once before cycle
+      tracker.observeAll();
+      // Create cycle and evaluate
+      graph.act(() => nodeA.replace([nodeC], (c) => 1 + c));
+      tracker.resetExpectations();
+
+      // Act
+      // Revert to pre-cycle graph
+      graph.act(() => {
+        nodeA.replace([], () => 1);
+      });
+
+      // Assert
+      tracker.expectNodeStateChanges({
+        a: { status: NodeStatus.Resolved, value: 1 },
+        c: { status: NodeStatus.Resolved, value: 3 },
       });
     });
   });

@@ -12,7 +12,6 @@
 api-extractor.json
 jest.config.js
 tsconfig.json
-/src/
 
 coverage
 *.log

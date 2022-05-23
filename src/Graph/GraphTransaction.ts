@@ -63,9 +63,26 @@ export class GraphTransaction {
     // Nodes observed directly
     const observed = Array.from(this.graph).filter((node) => node.hasObserver());
 
+    // Nodes unevaluated and observed
     const unevaluated = new Set<DataNode>();
     // Nodes observed either directly or indirectly
     const observedSet = new Set<DataNode>();
+
+    const cyclesNodes = new Set<DataNode>();
+
+    const prevCycleNodes = Array.from(this.graph).filter(
+      (node) => node.state.status === NodeStatus.CicularDependencyError,
+    );
+
+    const handleCycleNode = (cycleNode: DataNode) => {
+      const shouldNotify = cycleNode.setCircularDependencyError();
+      if (shouldNotify) {
+        this.notificationQueue.add(cycleNode);
+      }
+      cyclesNodes.add(cycleNode);
+      // Remove cycle nodes from unevaluated
+      unevaluated.delete(cycleNode);
+    };
 
     // Traverse observed subgraph looking for unevaluated nodes and detecting cycles
     // TODO Future optimization: whether or not each node is directly or indirectly observed can be cached
@@ -79,11 +96,7 @@ export class GraphTransaction {
         if (priorNodeIndex >= 0) {
           // Found cycle, set error on all cycle nodes
           const cycle = stack.slice(priorNodeIndex);
-          for (const cycleNode of cycle) {
-            cycleNode.state = { status: NodeStatus.CicularDependencyError };
-            // Remove cycle nodes from unevaluated
-            unevaluated.delete(cycleNode);
-          }
+          cycle.forEach(handleCycleNode);
 
           return;
         }
@@ -103,6 +116,14 @@ export class GraphTransaction {
       },
       'backward',
     );
+
+    // Mark dependents of cycle nodes as cycle nodes
+    dfs(Array.from(cyclesNodes), handleCycleNode, 'forward');
+
+    // Mark nodes that are no longer cycle nodes as unevaluated
+    for (const node of prevCycleNodes.filter((node) => !cyclesNodes.has(node))) {
+      unevaluated.add(node);
+    }
 
     // Traverse forwards, recursively making nodes as unevaluated
     dfs(
