@@ -39,7 +39,7 @@ class DataNode<TResult = unknown> {
    */
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
   private lastEvaluation: EvaluationCache<TResult> | undefined = undefined;
-  private lastCalculation: CalculationCache<TResult> | undefined = undefined;
+  private currentAsyncEvaluation: CalculationCache<TResult> | undefined = undefined;
   public dependents = new Set<DataNode>();
 
   // Use unknown to avoid problems with assigning DataNode<X> to DataNode<unknown>
@@ -117,7 +117,7 @@ class DataNode<TResult = unknown> {
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.invalidate()');
     this.state = { status: NodeStatus.Unevaluated };
-    this.lastCalculation = undefined;
+    this.currentAsyncEvaluation = undefined;
   }
 
   /**
@@ -169,7 +169,7 @@ class DataNode<TResult = unknown> {
     this.calculateFunction = calculateFn as CalculateFunction<TResult, unknown[]>;
     this.invalidate();
     this.lastEvaluation = undefined;
-    this.lastCalculation = undefined;
+    this.currentAsyncEvaluation = undefined;
   }
 
   private getEvaluationInfo(): EvaluationInfo<TResult> {
@@ -245,6 +245,7 @@ class DataNode<TResult = unknown> {
         this.pendingObservers.add(observer);
       }
     }
+    this.currentAsyncEvaluation = undefined;
     this.lastEvaluation = {
       dependencyStates: depStates,
       state: this.state,
@@ -310,17 +311,17 @@ class DataNode<TResult = unknown> {
     try {
       // Try to reuse the last calculation, which may have been cancelled
       if (
-        !this.lastCalculation ||
-        !areArraysEqual(this.lastCalculation.dependencyStates, depStates, areStatesEqual)
+        !this.currentAsyncEvaluation ||
+        !areArraysEqual(this.currentAsyncEvaluation.dependencyStates, depStates, areStatesEqual)
       ) {
         // Calculate node
-        this.lastCalculation = {
+        this.currentAsyncEvaluation = {
           dependencyStates: depStates,
           promise: Promise.resolve(this.calculateFunction.fn(...evaluationInfo.depValues)),
         };
       }
 
-      const value = await this.lastCalculation.promise;
+      const value = await this.currentAsyncEvaluation.promise;
 
       if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
