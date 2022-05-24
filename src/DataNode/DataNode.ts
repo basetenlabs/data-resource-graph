@@ -112,6 +112,13 @@ class DataNode<TResult = unknown> {
     this.state = { status: NodeStatus.Unevaluated };
   }
 
+  /**
+   * @internal
+   */
+  public markPending(): void {
+    this.state = { status: NodeStatus.Pending };
+  }
+
   public replace<TArgs extends unknown[]>(
     dependencies: DataNodesOf<TArgs>,
     fn: (...args: TArgs) => TResult,
@@ -165,7 +172,7 @@ class DataNode<TResult = unknown> {
       areArraysEqual(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
     ) {
       // Short circuit re-evaluation since dependencies are the same
-      return { depStates, shouldEvaluate: false, nextState: this.state };
+      return { depStates, shouldEvaluate: false, nextState: this.lastEvaluation.state };
     }
 
     const depValues: unknown[] = [];
@@ -290,6 +297,7 @@ class DataNode<TResult = unknown> {
     }
 
     const owningTransactionId = this.graph.transactionId;
+    this.state = { status: NodeStatus.Running };
 
     try {
       // Calculate node

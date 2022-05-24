@@ -631,7 +631,7 @@ describe('evaluation', () => {
       await tick();
 
       // Assert b still unevaluated
-      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Running });
 
       firstDeferredResult.resolve(5);
 
@@ -654,7 +654,7 @@ describe('evaluation', () => {
       ]);
     });
 
-    it("Node's async exection canceled by replacement of dependency", async () => {
+    it("Node's async execution canceled by replacement of dependency", async () => {
       const graph = TestGraphs.makeSmallChain();
       const [firstDeferredResult] = makeNodeDeferred(graph, 'b');
       const tracker = new GraphTracker(graph);
@@ -671,8 +671,7 @@ describe('evaluation', () => {
 
       await tick();
 
-      // B is still not evaluated
-      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Running });
 
       // Complete both calls to b
       firstDeferredResult.resolve(7);

@@ -17,6 +17,10 @@ export function areStatesEqual<TResult>(
     case NodeStatus.Resolved:
       assertSameStateType<typeof state1>(state2);
       return state1.value === state2.value;
+    case NodeStatus.Pending:
+      return true;
+    case NodeStatus.Running:
+      return true;
     case NodeStatus.OwnError:
       assertSameStateType<typeof state1>(state2);
       return state1.error === state2.error;
@@ -25,7 +29,6 @@ export function areStatesEqual<TResult>(
       return state1.error === state2.error && shallowEquals(state1.path, state2.path);
     case NodeStatus.CicularDependencyError:
       assertSameStateType<typeof state1>(state2);
-      // TODO: update once path added
       return true;
     case NodeStatus.Deleted:
       return true;

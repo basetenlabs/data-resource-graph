@@ -18,8 +18,6 @@ class Graph implements Iterable<DataNode> {
    */
   public transactionId = 0;
 
-  private currentTransaction: GraphTransaction | undefined;
-
   constructor(options: Partial<GraphOptions> = {}) {
     this.options = { ...defaultOptions, ...options };
   }
@@ -148,8 +146,7 @@ class Graph implements Iterable<DataNode> {
       this.isInMutationPhase = false;
     }
 
-    this.currentTransaction = new GraphTransaction(this, this.currentTransaction);
-    return this.currentTransaction.result;
+    return new GraphTransaction(this).result;
   }
   //#endregion transaction support
 }
