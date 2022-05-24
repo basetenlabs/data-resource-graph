@@ -25,7 +25,7 @@ export default function dfs(
 
   const stack: DataNode[] = [];
 
-  function visitHelperer(node: DataNode) {
+  function visitHelper(node: DataNode) {
     if (visited.has(node)) return;
 
     // Deleted nodes aren't automatically removed, but they're not part of the graph
@@ -42,13 +42,13 @@ export default function dfs(
     if (typeof result === 'undefined' || result == true) {
       // Recurse
       stack.push(node);
-      (direction === 'forward' ? node.dependents : node.dependencies).forEach(visitHelperer);
+      (direction === 'forward' ? node.dependents : node.dependencies).forEach(visitHelper);
       assert(stack.pop() === node, 'Stack in bad state');
     }
     visited.add(node);
   }
 
   for (const startingNode of startingNodes) {
-    visitHelperer(startingNode);
+    visitHelper(startingNode);
   }
 }

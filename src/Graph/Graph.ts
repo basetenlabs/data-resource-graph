@@ -68,6 +68,40 @@ class Graph implements Iterable<DataNode> {
   }
 
   /**
+   * Helper which either adds or replaces a node based on whether the node already exists
+   */
+  public upsertNode<TArgs extends unknown[], TResult>(
+    id: string,
+    dependencies: DataNodesOf<TArgs>,
+    fn: (...args: TArgs) => TResult,
+  ): DataNode<TResult> {
+    const existing = this.getNode<TResult>(id);
+    if (existing) {
+      existing.replace(dependencies, fn);
+      return existing;
+    } else {
+      return this.addNode(id, dependencies, fn);
+    }
+  }
+
+  /**
+   * Helper which either adds or replaces a node based on whether the node already exists for async calculate functions
+   */
+  public upsertAsyncNode<TArgs extends unknown[], TResult>(
+    id: string,
+    dependencies: DataNodesOf<TArgs>,
+    fn: (...args: TArgs) => Promise<TResult>,
+  ): DataNode<TResult> {
+    const existing = this.getNode<TResult>(id);
+    if (existing) {
+      existing.replaceWithAsync(dependencies, fn);
+      return existing;
+    } else {
+      return this.addAsyncNode(id, dependencies, fn);
+    }
+  }
+
+  /**
    * @internal
    */
   public deleteNodeInternal(node: DataNode): void {
@@ -76,8 +110,8 @@ class Graph implements Iterable<DataNode> {
     this.nodes.delete(node.id);
   }
 
-  getNode(id: string): DataNode | undefined {
-    return this.nodes.get(id);
+  getNode<TResult = unknown>(id: string): DataNode<TResult> | undefined {
+    return this.nodes.get(id) as DataNode<TResult> | undefined;
   }
 
   [Symbol.iterator](): IterableIterator<DataNode> {
