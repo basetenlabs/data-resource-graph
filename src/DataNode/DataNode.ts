@@ -1,17 +1,23 @@
 import Graph from '../Graph';
 import assert from '../utils/assert';
-import { shallowEquals } from '../utils/utils';
 import { NodeState, NodeStatus } from './NodeState';
 import { CalculateFunction, DataNodesOf, Observer } from './types';
 import { areArraysEqual, areStatesEqual } from './utils';
 
-interface EvaluationData<TResult> {
-  dependencies: DataNode[];
+interface EvaluationCache<TResult> {
   dependencyStates: NodeState<unknown>[];
   /**
    * Output of state after evaluation is run. Unlike DataNode.state, this is not cleared on invalidation
    */
   state: NodeState<TResult>;
+}
+
+interface CalculationCache<TResult> {
+  dependencyStates: NodeState<unknown>[];
+  /**
+   * Output of state after evaluation is run. Unlike DataNode.state, this is not cleared on invalidation
+   */
+  promise: Promise<TResult>;
 }
 
 type EvaluationInfo<TResult> = {
@@ -32,7 +38,8 @@ class DataNode<TResult = unknown> {
    * @internal - Access the node state by adding an observer
    */
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
-  private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
+  private lastEvaluation: EvaluationCache<TResult> | undefined = undefined;
+  private lastCalculation: CalculationCache<TResult> | undefined = undefined;
   public dependents = new Set<DataNode>();
 
   // Use unknown to avoid problems with assigning DataNode<X> to DataNode<unknown>
@@ -110,6 +117,7 @@ class DataNode<TResult = unknown> {
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.invalidate()');
     this.state = { status: NodeStatus.Unevaluated };
+    this.lastCalculation = undefined;
   }
 
   /**
@@ -160,6 +168,8 @@ class DataNode<TResult = unknown> {
 
     this.calculateFunction = calculateFn as CalculateFunction<TResult, unknown[]>;
     this.invalidate();
+    this.lastEvaluation = undefined;
+    this.lastCalculation = undefined;
   }
 
   private getEvaluationInfo(): EvaluationInfo<TResult> {
@@ -168,7 +178,6 @@ class DataNode<TResult = unknown> {
     if (
       this.lastEvaluation &&
       this.state.status !== NodeStatus.Unevaluated &&
-      shallowEquals(this.dependencies, this.lastEvaluation.dependencies) &&
       areArraysEqual(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
     ) {
       // Short circuit re-evaluation since dependencies are the same
@@ -238,7 +247,6 @@ class DataNode<TResult = unknown> {
     }
     this.lastEvaluation = {
       dependencyStates: depStates,
-      dependencies: this.dependencies,
       state: this.state,
     };
   }
@@ -300,8 +308,19 @@ class DataNode<TResult = unknown> {
     this.state = { status: NodeStatus.Running };
 
     try {
-      // Calculate node
-      const value = await this.calculateFunction.fn(...evaluationInfo.depValues);
+      // Try to reuse the last calculation, which may have been cancelled
+      if (
+        !this.lastCalculation ||
+        !areArraysEqual(this.lastCalculation.dependencyStates, depStates, areStatesEqual)
+      ) {
+        // Calculate node
+        this.lastCalculation = {
+          dependencyStates: depStates,
+          promise: Promise.resolve(this.calculateFunction.fn(...evaluationInfo.depValues)),
+        };
+      }
+
+      const value = await this.lastCalculation.promise;
 
       if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
