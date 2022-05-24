@@ -97,6 +97,9 @@ class DataNode<TResult = unknown> {
     return !!this.pendingObservers.size;
   }
 
+  /**
+   * @internal
+   */
   public notifyObservers(): void {
     for (const observer of this.pendingObservers) {
       try {
