@@ -2,7 +2,7 @@ import DataNode from '../DataNode';
 import { CalculateFunction, DataNodesOf } from '../DataNode/types';
 import { GraphTransaction } from './GraphTransaction';
 import { defaultOptions, GraphOptions } from './options';
-import { TransactionResult } from './types';
+import { MutationInfo, TransactionResult } from './types';
 
 /**
  * @public
@@ -11,7 +11,7 @@ class Graph implements Iterable<DataNode> {
   private readonly nodes: Map<string, DataNode> = new Map();
   public readonly options: GraphOptions;
 
-  private isInMutationPhase = false;
+  private currentMutation: MutationInfo | undefined;
   /**
    * Incrementing counter corresponding to most recent transaction
    * @internal
@@ -43,7 +43,7 @@ class Graph implements Iterable<DataNode> {
     dependencies: DataNodesOf<TArgs>,
     calculate: CalculateFunction<TResult, TArgs>,
   ): DataNode<TResult> {
-    this.assertTransaction('Graph.addNode()');
+    this.markMutated('Graph.addNode()');
 
     if (this.nodes.has(id)) {
       throw new Error(`Node with id ${id} already exists`);
@@ -103,8 +103,6 @@ class Graph implements Iterable<DataNode> {
    * @internal
    */
   public deleteNodeInternal(node: DataNode): void {
-    this.assertTransaction('Graph.deleteNode()');
-
     this.nodes.delete(node.id);
   }
 
@@ -120,33 +118,39 @@ class Graph implements Iterable<DataNode> {
   /**
    * @internal
    */
-  public assertTransaction(name = 'method'): void {
-    if (!this.isInMutationPhase) {
+  public markMutated(name = 'method'): void {
+    if (!this.currentMutation) {
       throw new Error(`${name} must be called inside a transaction`);
     }
+    this.currentMutation.isChanged = true;
   }
 
   /**
-   * Run mutations inside an action
-   * @returns TransactionResult, only for outermost act() call
+   * Run mutations on the graph, resulting in graph re-evaluation
+   *
+   * @returns TransactionResult, only for outermost act() call. Also undefined if mutator didn't alter the graph.
    */
   public act(mutator: () => void): TransactionResult | undefined {
-    if (this.isInMutationPhase) {
+    if (this.currentMutation) {
       // If already inside a transaction, can just call callback
       mutator();
       return undefined;
     }
 
-    this.isInMutationPhase = true;
-    this.transactionId++;
+    this.currentMutation = { isChanged: false };
 
     try {
       mutator();
+      // Only process transaction if mutator caused a mutation
+      if (this.currentMutation.isChanged) {
+        this.transactionId++;
+        return new GraphTransaction(this).result;
+      }
     } finally {
-      this.isInMutationPhase = false;
+      this.currentMutation = undefined;
     }
 
-    return new GraphTransaction(this).result;
+    return { sync: true };
   }
   //#endregion transaction support
 }

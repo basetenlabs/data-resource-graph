@@ -24,3 +24,13 @@ export type TransactionResult =
        */
       completion: Promise<AsyncTransactionCompletion>;
     };
+
+/**
+ * @internal
+ */
+export interface MutationInfo {
+  /**
+   * Whether the graph or any data nodes have been altered during the current mutation
+   */
+  isChanged: boolean;
+}
