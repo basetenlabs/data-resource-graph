@@ -227,12 +227,7 @@ export declare enum NodeStatus {
  */
 export declare type Observer<TResult> = (state: EvaluatedNodeState<TResult>) => void;
 
-/**
- * @public
- */
-export declare type PendingNodeState = {
-    status: NodeStatus.Pending;
-};
+/* Excluded from this release type: PendingNodeState */
 
 /**
  * @public
@@ -242,12 +237,7 @@ export declare type ResolvedNodeState<TResult> = {
     value: TResult;
 };
 
-/**
- * @public
- */
-export declare type RunningNodeState = {
-    status: NodeStatus.Running;
-};
+/* Excluded from this release type: RunningNodeState */
 
 /**
  * Describes the execution that takes place after a transaction
@@ -263,11 +253,6 @@ export declare type TransactionResult = {
     completion: Promise<AsyncTransactionCompletion>;
 };
 
-/**
- * @public
- */
-export declare type UnevaluatedNodeState = {
-    status: NodeStatus.Unevaluated;
-};
+/* Excluded from this release type: UnevaluatedNodeState */
 
 export { }

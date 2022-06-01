@@ -45,17 +45,17 @@ export enum NodeStatus {
 }
 
 /**
- * @public
+ * @internal
  */
 export type UnevaluatedNodeState = { status: NodeStatus.Unevaluated };
 
 /**
- * @public
+ * @internal
  */
 export type PendingNodeState = { status: NodeStatus.Pending };
 
 /**
- * @public
+ * @internal
  */
 export type RunningNodeState = { status: NodeStatus.Running };
 
