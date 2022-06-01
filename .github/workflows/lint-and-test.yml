@@ -22,3 +22,9 @@ jobs:
       - run: yarn test
       - run: yarn lint
       - run: yarn build-all
+      - run: |
+          if [[ $(git status --porcelain) ]]; then
+            echo "Encountered uncommitted files:"
+            git status --porcelain
+            exit 1
+          fi
