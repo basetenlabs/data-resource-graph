@@ -1,6 +1,6 @@
 {
   "name": "data-resource-graph",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "An evaluator for complex data dependency graphs",
   "author": "BaseTen",
   "repository": "https://github.com/baseten/data-resource-graph",
