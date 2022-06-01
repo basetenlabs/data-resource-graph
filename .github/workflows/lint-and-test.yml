@@ -26,5 +26,7 @@ jobs:
           if [[ $(git status --porcelain) ]]; then
             echo "Encountered uncommitted files:"
             git status --porcelain
+            echo ""
+            echo "You may need to run `yarn build-all`, commit any changes, and push again."
             exit 1
           fi
