@@ -229,13 +229,7 @@ export declare type Observer<TResult> = (state: EvaluatedNodeState<TResult>) => 
 
 /* Excluded from this release type: PendingNodeState */
 
-/**
- * @public
- */
-export declare type ResolvedNodeState<TResult> = {
-    status: NodeStatus.Resolved;
-    value: TResult;
-};
+/* Excluded from this release type: ResolvedNodeState */
 
 /* Excluded from this release type: RunningNodeState */
 
@@ -255,4 +249,5 @@ export declare type TransactionResult = {
 
 /* Excluded from this release type: UnevaluatedNodeState */
 
-export { }
+export { };
+
