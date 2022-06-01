@@ -631,7 +631,7 @@ describe('evaluation', () => {
       await tick();
 
       // Assert b still unevaluated
-      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Running });
 
       firstDeferredResult.resolve(5);
 
@@ -654,7 +654,7 @@ describe('evaluation', () => {
       ]);
     });
 
-    it("Node's async exection canceled by replacement of dependency", async () => {
+    it("Node's async execution canceled by replacement of dependency", async () => {
       const graph = TestGraphs.makeSmallChain();
       const [firstDeferredResult] = makeNodeDeferred(graph, 'b');
       const tracker = new GraphTracker(graph);
@@ -671,8 +671,7 @@ describe('evaluation', () => {
 
       await tick();
 
-      // B is still not evaluated
-      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Unevaluated });
+      expect(graph.getNode('b')?.state).toEqual({ status: NodeStatus.Running });
 
       // Complete both calls to b
       firstDeferredResult.resolve(7);
@@ -697,7 +696,7 @@ describe('evaluation', () => {
       ]);
     });
 
-    it('Waiting nodes from cancelled transaction recalculated in next transaction', async () => {
+    it('Waiting nodes from cancelled transaction recalculates in next transaction', async () => {
       const graph = TestGraphs.makeSmallChain();
       const tracker = new GraphTracker(graph);
 
@@ -728,12 +727,59 @@ describe('evaluation', () => {
       tracker.resetExpectations();
 
       // Third transaction While b is calculating, e in added and observed, causing second transaction to be cancelled
+      const thirdTransaction = graph.act(() =>
+        // Replace a
+        graph.upsertNode('a', [], () => -1),
+      );
+
+      await expect(getCompletion(thirdTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      tracker.expectNodeStateChanges({
+        a: { status: NodeStatus.Resolved, value: -1 },
+        b: { status: NodeStatus.Resolved, value: 4 },
+        c: { status: NodeStatus.Resolved, value: 11 },
+      });
+
+      // Ensure that after third transaction, b and c are updated
+      tracker.expectObservationBatches([
+        // Third transaction
+        [['a', { status: NodeStatus.Resolved, value: -1 }]],
+        [
+          ['b', { status: NodeStatus.Resolved, value: 4 }],
+          ['c', { status: NodeStatus.Resolved, value: 11 }],
+        ],
+      ]);
+    });
+
+    it('Reuses previous async calculation if still valid', async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+
+      // Run first transaction, evaluating graph fully
+      tracker.observeAll();
+
+      let deferred: Deferred<unknown> | undefined;
+
+      // Start second transaction, replacing a and making b async
+      graph.act(() => {
+        assertDefined(graph.getNode('a')).replace([], () => 2);
+        [deferred] = makeNodeDeferred(graph, 'b');
+      });
+      await tick();
+      tracker.resetExpectations();
+
+      // Third transaction While b is calculating, e in added and observed, causing second transaction to be cancelled
+      // But adding e doesn't affect b, so b's in-progress calculation can be reused
       const thirdTransaction = graph.act(() => {
         // Add a disconnected node
         graph.addNode('e', [], () => 0);
         tracker.observe(['e']);
+        tracker.spyOnCalculates();
       });
 
+      await tick();
+
+      assertDefined(deferred).resolve(4);
       await expect(getCompletion(thirdTransaction)).resolves.toEqual({ wasCancelled: false });
 
       tracker.expectNodeStateChanges({
@@ -741,6 +787,9 @@ describe('evaluation', () => {
         b: { status: NodeStatus.Resolved, value: 4 },
         c: { status: NodeStatus.Resolved, value: 11 },
       });
+
+      // b's calculate function was not called after the spy was added
+      tracker.expectToHaveCalculated(['e', 'c']);
 
       // Ensure that after third transaction, b and c are updated
       tracker.expectObservationBatches([

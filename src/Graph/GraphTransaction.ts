@@ -30,7 +30,6 @@ export class GraphTransaction {
   private readonly completionDeferred = new Deferred<AsyncTransactionCompletion>();
 
   //#region node evaluation states
-  private readonly nodesPendingExecution: Set<DataNode>;
   private readonly ready = new Set<DataNode>();
   /**
    * Map of nodes with unfinished dependencies to the number of dependencies, like a semaphore
@@ -39,16 +38,13 @@ export class GraphTransaction {
   private readonly running = new Set<DataNode>();
   //#endregion node evaluation states
 
-  constructor(
-    private readonly graph: Graph,
-    private readonly previousTransaction: GraphTransaction | undefined,
-  ) {
+  constructor(private readonly graph: Graph) {
     this.transactionId = graph.transactionId;
     this.makeReevaluationGraph();
 
-    this.nodesPendingExecution = new Set<DataNode>([...this.ready.keys(), ...this.waiting.keys()]);
+    const nodesPendingExecution = new Set<DataNode>([...this.ready.keys(), ...this.waiting.keys()]);
 
-    const hasAsyncReevaluation = someIterable(this.nodesPendingExecution, (node) => node.isAsync());
+    const hasAsyncReevaluation = someIterable(nodesPendingExecution, (node) => node.isAsync());
 
     if (hasAsyncReevaluation) {
       this.result = { sync: false, completion: this.completionDeferred.promise };
@@ -63,7 +59,7 @@ export class GraphTransaction {
     // Nodes observed directly
     const observed = Array.from(this.graph).filter((node) => node.hasObserver());
 
-    // Nodes unevaluated and observed
+    // Nodes that need to be evaluated during the transaction
     const unevaluated = new Set<DataNode>();
     // Nodes observed either directly or indirectly
     const observedSet = new Set<DataNode>();
@@ -104,7 +100,10 @@ export class GraphTransaction {
         // Check if node needs to be evaluated
         if (node.state.status === NodeStatus.Unevaluated) {
           unevaluated.add(node);
-        } else if (this.previousTransaction?.isNodePendingExecution(node)) {
+        } else if (
+          node.state.status === NodeStatus.Pending ||
+          node.state.status === NodeStatus.Running
+        ) {
           // Carry over nodes that were supposed to be executed last transaction but weren't
           unevaluated.add(node);
         }
@@ -125,13 +124,17 @@ export class GraphTransaction {
       unevaluated.add(node);
     }
 
-    // Traverse forwards, recursively making nodes as unevaluated
+    // Traverse forwards, recursively adding nodes to evaluation set
     dfs(
       Array.from(unevaluated),
       (node) => {
+        if (!observedSet.has(node)) {
+          return false;
+        }
         if (node.state.status !== NodeStatus.CicularDependencyError) {
           unevaluated.add(node);
         }
+        return true;
       },
       'forward',
     );
@@ -139,6 +142,9 @@ export class GraphTransaction {
     // For all observed and unevaluated nodes, decide whether it's ready or is waiting on dependencies
     for (const node of observedSet) {
       if (unevaluated.has(node)) {
+        if (node.state.status !== NodeStatus.Unevaluated) {
+          node.markPending();
+        }
         let numUnevaluatedDeps = 0;
         for (const dep of node.dependencies) {
           if (unevaluated.has(dep)) numUnevaluatedDeps++;
@@ -197,10 +203,6 @@ export class GraphTransaction {
   private checkForCompletion(): boolean {
     if (!this.ready.size && !this.running.size) {
       assert(!this.waiting.size, 'Exhausted ready queue with nodes still waiting');
-      assert(
-        !this.nodesPendingExecution.size,
-        'Found nodes pending execution after evaluation ended',
-      );
       this.flushNotificationQueue(true);
       this.complete(false);
       return true;
@@ -225,7 +227,6 @@ export class GraphTransaction {
     // Evaluate all synchronous ready nodes
     while ((readyNode = takeFromSetIf(this.ready, (node) => !node.isAsync()))) {
       readyNode.evaluate();
-      this.nodesPendingExecution.delete(readyNode);
       this.notificationQueue.add(readyNode);
       this.signalDependents(readyNode);
     }
@@ -243,7 +244,6 @@ export class GraphTransaction {
         node.evaluateAsync().then(
           () => {
             this.running.delete(node);
-            this.nodesPendingExecution.delete(node);
             this.notificationQueue.add(node);
             this.signalDependents(node);
             // Run work loop again
@@ -261,9 +261,5 @@ export class GraphTransaction {
       // Not complete and ready queue is empty, so must have nodes running
       assert(this.running.size);
     }
-  }
-
-  public isNodePendingExecution(node: DataNode): boolean {
-    return this.nodesPendingExecution.has(node);
   }
 }

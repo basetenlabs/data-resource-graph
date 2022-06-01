@@ -6,9 +6,18 @@ import DataNode from './DataNode';
  */
 export enum NodeStatus {
   /**
-   * No dependencies, hasn't been called
+   * Node hasn't been called or has been invalidated
    */
   Unevaluated = 'uneval',
+  /**
+   * Node is awaiting evaluation. This is differs from `NodeStatus.Unevaluated` in that the last calculation
+   * may be reused if it's still valid
+   */
+  Pending = 'pending',
+  /**
+   * Calculate function is executing. Async nodes only
+   */
+  Running = 'running',
   /**
    * Value is computed and current
    */
@@ -39,6 +48,16 @@ export enum NodeStatus {
  * @public
  */
 export type UnevaluatedNodeState = { status: NodeStatus.Unevaluated };
+
+/**
+ * @public
+ */
+export type PendingNodeState = { status: NodeStatus.Pending };
+
+/**
+ * @public
+ */
+export type RunningNodeState = { status: NodeStatus.Running };
 
 /**
  * @public
@@ -98,6 +117,8 @@ export type MissingDependencyErrorNodeState = {
  */
 export type NodeState<TResult> =
   | UnevaluatedNodeState
+  | PendingNodeState
+  | RunningNodeState
   | DeletedNodeState
   | MissingDependencyErrorNodeState
   | CircularDependencyNodeState

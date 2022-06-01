@@ -44,24 +44,14 @@ export function graphBuilder<TValue = unknown>(defaultNodeValue: TValue): GraphB
     addNode(id, deps, calculateFn = () => defaultNodeValue) {
       const depNodes = deps.map(ensureNode);
 
-      let node = graph.getNode(id);
-      if (node) {
-        node.replace<TValue[]>(depNodes as DataNode<TValue>[], calculateFn);
-      } else {
-        node = graph.addNode<TValue[], TValue>(id, depNodes, calculateFn);
-      }
+      graph.upsertNode(id, depNodes, calculateFn);
 
       return graphBuilder;
     },
     addNodeAsync(id, deps, calculateFn = () => Promise.resolve(defaultNodeValue)) {
       const depNodes = deps.map(ensureNode);
 
-      let node = graph.getNode(id);
-      if (node) {
-        node.replaceWithAsync<TValue[]>(depNodes as DataNode<TValue>[], calculateFn);
-      } else {
-        node = graph.addAsyncNode<TValue[], TValue>(id, depNodes, calculateFn);
-      }
+      graph.upsertAsyncNode(id, depNodes, calculateFn);
 
       return graphBuilder;
     },

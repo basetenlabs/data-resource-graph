@@ -1,17 +1,23 @@
 import Graph from '../Graph';
 import assert from '../utils/assert';
-import { shallowEquals } from '../utils/utils';
 import { NodeState, NodeStatus } from './NodeState';
 import { CalculateFunction, DataNodesOf, Observer } from './types';
 import { areArraysEqual, areStatesEqual } from './utils';
 
-interface EvaluationData<TResult> {
-  dependencies: DataNode[];
+interface EvaluationCache<TResult> {
   dependencyStates: NodeState<unknown>[];
   /**
    * Output of state after evaluation is run. Unlike DataNode.state, this is not cleared on invalidation
    */
   state: NodeState<TResult>;
+}
+
+interface CalculationCache<TResult> {
+  dependencyStates: NodeState<unknown>[];
+  /**
+   * Output of state after evaluation is run. Unlike DataNode.state, this is not cleared on invalidation
+   */
+  promise: Promise<TResult>;
 }
 
 type EvaluationInfo<TResult> = {
@@ -32,7 +38,8 @@ class DataNode<TResult = unknown> {
    * @internal - Access the node state by adding an observer
    */
   public state: NodeState<TResult> = { status: NodeStatus.Unevaluated };
-  private lastEvaluation: EvaluationData<TResult> | undefined = undefined;
+  private lastEvaluation: EvaluationCache<TResult> | undefined = undefined;
+  private currentAsyncEvaluation: CalculationCache<TResult> | undefined = undefined;
   public dependents = new Set<DataNode>();
 
   // Use unknown to avoid problems with assigning DataNode<X> to DataNode<unknown>
@@ -90,6 +97,9 @@ class DataNode<TResult = unknown> {
     return !!this.pendingObservers.size;
   }
 
+  /**
+   * @internal
+   */
   public notifyObservers(): void {
     for (const observer of this.pendingObservers) {
       try {
@@ -110,6 +120,14 @@ class DataNode<TResult = unknown> {
     this.assertNotDeleted();
     this.graph.assertTransaction('DataNode.invalidate()');
     this.state = { status: NodeStatus.Unevaluated };
+    this.currentAsyncEvaluation = undefined;
+  }
+
+  /**
+   * @internal
+   */
+  public markPending(): void {
+    this.state = { status: NodeStatus.Pending };
   }
 
   public replace<TArgs extends unknown[]>(
@@ -153,6 +171,8 @@ class DataNode<TResult = unknown> {
 
     this.calculateFunction = calculateFn as CalculateFunction<TResult, unknown[]>;
     this.invalidate();
+    this.lastEvaluation = undefined;
+    this.currentAsyncEvaluation = undefined;
   }
 
   private getEvaluationInfo(): EvaluationInfo<TResult> {
@@ -161,11 +181,10 @@ class DataNode<TResult = unknown> {
     if (
       this.lastEvaluation &&
       this.state.status !== NodeStatus.Unevaluated &&
-      shallowEquals(this.dependencies, this.lastEvaluation.dependencies) &&
       areArraysEqual(depStates, this.lastEvaluation.dependencyStates, areStatesEqual)
     ) {
       // Short circuit re-evaluation since dependencies are the same
-      return { depStates, shouldEvaluate: false, nextState: this.state };
+      return { depStates, shouldEvaluate: false, nextState: this.lastEvaluation.state };
     }
 
     const depValues: unknown[] = [];
@@ -229,9 +248,9 @@ class DataNode<TResult = unknown> {
         this.pendingObservers.add(observer);
       }
     }
+    this.currentAsyncEvaluation = undefined;
     this.lastEvaluation = {
       dependencyStates: depStates,
-      dependencies: this.dependencies,
       state: this.state,
     };
   }
@@ -290,10 +309,22 @@ class DataNode<TResult = unknown> {
     }
 
     const owningTransactionId = this.graph.transactionId;
+    this.state = { status: NodeStatus.Running };
 
     try {
-      // Calculate node
-      const value = await this.calculateFunction.fn(...evaluationInfo.depValues);
+      // Try to reuse the last calculation, which may have been cancelled
+      if (
+        !this.currentAsyncEvaluation ||
+        !areArraysEqual(this.currentAsyncEvaluation.dependencyStates, depStates, areStatesEqual)
+      ) {
+        // Calculate node
+        this.currentAsyncEvaluation = {
+          dependencyStates: depStates,
+          promise: Promise.resolve(this.calculateFunction.fn(...evaluationInfo.depValues)),
+        };
+      }
+
+      const value = await this.currentAsyncEvaluation.promise;
 
       if (owningTransactionId !== this.graph.transactionId) {
         // Another evaluation has begin. Discard result
