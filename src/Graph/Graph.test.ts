@@ -709,9 +709,8 @@ describe('evaluation', () => {
 
       let deferred: Deferred<unknown> | undefined;
 
-      // Start second transaction, replacing a and making b async
+      // Start second transaction, making b async
       graph.act(() => {
-        assertDefined(graph.getNode('a')).replace([], () => 2);
         [deferred] = makeNodeDeferred(graph, 'b');
       });
       await tick();
@@ -744,6 +743,48 @@ describe('evaluation', () => {
       tracker.expectObservationBatches([
         // Third transaction
         [['e', { status: NodeStatus.Resolved, value: 0 }]],
+        [
+          ['b', { status: NodeStatus.Resolved, value: 4 }],
+          ['c', { status: NodeStatus.Resolved, value: 11 }],
+        ],
+      ]);
+    });
+
+    it("Doesn't reuse previous async calculation if node invalidated", async () => {
+      const graph = TestGraphs.makeSmallChain();
+      const tracker = new GraphTracker(graph);
+
+      // Run first transaction, evaluating graph fully
+      tracker.observeAll();
+
+      let deferred: Deferred<unknown> | undefined;
+
+      // Start second transaction, replacing a and making b async
+      graph.act(() => {
+        [deferred] = makeNodeDeferred(graph, 'b');
+      });
+      await tick();
+      tracker.resetExpectations();
+
+      // Third transaction: While b is calculating, e in added and observed, causing second transaction to be cancelled
+      // But adding e doesn't affect b, so b's in-progress calculation can be reused
+      const thirdTransaction = graph.act(() => {
+        // Add a disconnected node
+        assertDefined(graph.getNode('b')).invalidate();
+        tracker.spyOnCalculates();
+      });
+
+      await tick();
+
+      assertDefined(deferred).resolve(4);
+      await expect(getCompletion(thirdTransaction)).resolves.toEqual({ wasCancelled: false });
+
+      // b's calculate function was not called after the spy was added
+      tracker.expectToHaveCalculated(['b', 'c']);
+
+      // Ensure that after third transaction, b and c are updated
+      tracker.expectObservationBatches([
+        // Third transaction
         [
           ['b', { status: NodeStatus.Resolved, value: 4 }],
           ['c', { status: NodeStatus.Resolved, value: 11 }],
