@@ -66,7 +66,7 @@ class DataNode<TResult = unknown> {
     const unknownObserver = observer as Observer<unknown>;
 
     this.assertNotDeleted();
-    this.graph.assertTransaction('DataNode.addObserver()');
+    this.graph.markMutated('DataNode.addObserver()');
 
     if (this.observers.includes(unknownObserver)) return;
     this.observers.push(unknownObserver);
@@ -78,7 +78,7 @@ class DataNode<TResult = unknown> {
     const unknownObserver = observer as Observer<unknown>;
 
     this.assertNotDeleted();
-    this.graph.assertTransaction('DataNode.removeObserver()');
+    this.graph.markMutated('DataNode.removeObserver()');
 
     const index = this.observers.indexOf(unknownObserver);
     if (index < 0) return;
@@ -102,6 +102,12 @@ class DataNode<TResult = unknown> {
    */
   public notifyObservers(): void {
     for (const observer of this.pendingObservers) {
+      assert(
+        this.state.status !== NodeStatus.Unevaluated &&
+          this.state.status !== NodeStatus.Pending &&
+          this.state.status !== NodeStatus.Running,
+        'Observers being notified with non-observable state',
+      );
       try {
         observer(this.state);
       } catch (err) {
@@ -118,7 +124,7 @@ class DataNode<TResult = unknown> {
    */
   public invalidate(): void {
     this.assertNotDeleted();
-    this.graph.assertTransaction('DataNode.invalidate()');
+    this.graph.markMutated('DataNode.invalidate()');
     this.state = { status: NodeStatus.Unevaluated };
     this.currentAsyncEvaluation = undefined;
   }
@@ -149,7 +155,7 @@ class DataNode<TResult = unknown> {
     calculateFn: CalculateFunction<TResult, TArgs>,
   ): void {
     this.assertNotDeleted();
-    this.graph.assertTransaction('DataNode.replace()');
+    this.graph.markMutated('DataNode.replace()');
 
     // Remove self from old dependencies
     for (const dependency of this.dependencies) {
@@ -354,8 +360,8 @@ class DataNode<TResult = unknown> {
   }
 
   public delete(): void {
-    this.graph.assertTransaction('DataNode.delete()');
     if (this.isDeleted()) return;
+    this.graph.markMutated('DataNode.delete()');
 
     this.state = { status: NodeStatus.Deleted };
 

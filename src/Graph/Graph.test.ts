@@ -484,6 +484,12 @@ describe('evaluation', () => {
       return result.completion;
     }
 
+    async function awaitTransaction(result: TransactionResult | undefined): Promise<void> {
+      if (result?.sync === false) {
+        await result.completion;
+      }
+    }
+
     async function tick() {
       // Takes two promise resolutions to complete continuation code within evaluation
       await Promise.resolve();
@@ -638,8 +644,6 @@ describe('evaluation', () => {
       // Complete both calls to b
       secondDeferredResult.resolve(3);
 
-      await tick();
-
       await expect(getCompletion(firstTransaction)).resolves.toEqual({ wasCancelled: true });
       await expect(getCompletion(secondTransaction)).resolves.toEqual({ wasCancelled: false });
 
@@ -696,61 +700,6 @@ describe('evaluation', () => {
       ]);
     });
 
-    it('Waiting nodes from cancelled transaction recalculates in next transaction', async () => {
-      const graph = TestGraphs.makeSmallChain();
-      const tracker = new GraphTracker(graph);
-
-      // Run first transaction, evaluating graph fully
-      await getCompletion(
-        graph.act(() => {
-          makeNodeAsync(
-            graph,
-            'b',
-            jest
-              .fn()
-              // First calculate returns 3
-              .mockResolvedValueOnce(3)
-              // second calculate returns a promise that never resolves
-              .mockReturnValueOnce(new Promise(() => {}))
-              // Third calculate returns 4
-              .mockResolvedValueOnce(4),
-          );
-          tracker.observeAll();
-        }),
-      );
-
-      // Start second transaction, replacing a
-      graph.act(() => {
-        assertDefined(graph.getNode('a')).replace([], () => 2);
-      });
-      await tick();
-      tracker.resetExpectations();
-
-      // Third transaction While b is calculating, e in added and observed, causing second transaction to be cancelled
-      const thirdTransaction = graph.act(() =>
-        // Replace a
-        graph.upsertNode('a', [], () => -1),
-      );
-
-      await expect(getCompletion(thirdTransaction)).resolves.toEqual({ wasCancelled: false });
-
-      tracker.expectNodeStateChanges({
-        a: { status: NodeStatus.Resolved, value: -1 },
-        b: { status: NodeStatus.Resolved, value: 4 },
-        c: { status: NodeStatus.Resolved, value: 11 },
-      });
-
-      // Ensure that after third transaction, b and c are updated
-      tracker.expectObservationBatches([
-        // Third transaction
-        [['a', { status: NodeStatus.Resolved, value: -1 }]],
-        [
-          ['b', { status: NodeStatus.Resolved, value: 4 }],
-          ['c', { status: NodeStatus.Resolved, value: 11 }],
-        ],
-      ]);
-    });
-
     it('Reuses previous async calculation if still valid', async () => {
       const graph = TestGraphs.makeSmallChain();
       const tracker = new GraphTracker(graph);
@@ -768,7 +717,7 @@ describe('evaluation', () => {
       await tick();
       tracker.resetExpectations();
 
-      // Third transaction While b is calculating, e in added and observed, causing second transaction to be cancelled
+      // Third transaction: While b is calculating, e in added and observed, causing second transaction to be cancelled
       // But adding e doesn't affect b, so b's in-progress calculation can be reused
       const thirdTransaction = graph.act(() => {
         // Add a disconnected node
@@ -802,7 +751,7 @@ describe('evaluation', () => {
       ]);
     });
 
-    it("does't reexecute async node if dependency invalidated", async () => {
+    it("doesn't reexecute async node if dependency invalidated", async () => {
       // Arrange
       const graph = TestGraphs.makeSmallChain();
       const tracker = new GraphTracker(graph);
@@ -887,6 +836,196 @@ describe('evaluation', () => {
         [['a', { status: NodeStatus.Resolved, value: 1 }]],
         [['b', { status: NodeStatus.Resolved, value: 4 }]],
       ]);
+    });
+
+    describe('async calculation preemption', () => {
+      async function preemptCalculationWithNewTransaction({
+        graph,
+        tracker,
+        newTransactionMutation,
+        preemptedTransactionExtraMutation,
+        isNodeBChanged = true,
+        preemptedTransactionIsCanceled,
+      }: {
+        graph: Graph;
+        tracker: GraphTracker;
+        newTransactionMutation: () => void;
+        preemptedTransactionExtraMutation?: () => void;
+        isNodeBChanged?: boolean;
+        preemptedTransactionIsCanceled: boolean;
+      }) {
+        const deferredB = new Deferred<number>();
+
+        // Run first transaction, evaluating graph fully
+        await getCompletion(
+          graph.act(() => {
+            makeNodeAsync(
+              graph,
+              'b',
+              jest
+                .fn()
+                // First calculate returns 5
+                .mockResolvedValueOnce(5)
+                // second calculate returns a promise that never resolves
+                .mockReturnValueOnce(deferredB.promise),
+            );
+            tracker.observeAll();
+          }),
+        );
+
+        // Start second transaction, replacing a
+        const secondTransaction = graph.act(() => {
+          assertDefined(graph.getNode('a')).replace([], () => 2);
+          preemptedTransactionExtraMutation?.();
+        });
+        await tick();
+
+        // Third transaction: While b is calculating, new transaction cancels second transaction
+        const thirdTransaction = graph.act(newTransactionMutation);
+
+        tracker.resetExpectations();
+
+        deferredB.resolve(isNodeBChanged ? 4 : 5);
+        await expect(getCompletion(secondTransaction)).resolves.toEqual({
+          wasCancelled: preemptedTransactionIsCanceled,
+        });
+        await awaitTransaction(thirdTransaction);
+      }
+
+      it('cancelled by disconnected node being added', async () => {
+        const graph = TestGraphs.makeSmallChain();
+        const tracker = new GraphTracker(graph);
+
+        await preemptCalculationWithNewTransaction({
+          graph,
+          tracker,
+          newTransactionMutation() {
+            // Add a disconnected node
+            graph.addNode('e', [], () => 0);
+            tracker.observe(['e']);
+            tracker.spyOnCalculates();
+          },
+          preemptedTransactionIsCanceled: true,
+        });
+
+        // Ensure that after third transaction, b and c are updated
+        tracker.expectObservationBatches([
+          [
+            ['b', { status: NodeStatus.Resolved, value: 4 }],
+            ['c', { status: NodeStatus.Resolved, value: 11 }],
+          ],
+        ]);
+      });
+
+      it('preempted by empty mutation', async () => {
+        const graph = TestGraphs.makeSmallChain();
+        const tracker = new GraphTracker(graph);
+
+        await preemptCalculationWithNewTransaction({
+          graph,
+          tracker,
+          newTransactionMutation() {},
+          preemptedTransactionIsCanceled: false,
+        });
+
+        // Ensure that after third transaction, b and c are updated
+        tracker.expectObservationBatches([
+          // Third transaction
+          [
+            ['b', { status: NodeStatus.Resolved, value: 4 }],
+            ['c', { status: NodeStatus.Resolved, value: 11 }],
+          ],
+        ]);
+      });
+
+      it('cancelled by upstream node invalidated', async () => {
+        const graph = TestGraphs.makeSmallChain();
+        const tracker = new GraphTracker(graph);
+
+        await preemptCalculationWithNewTransaction({
+          graph,
+          tracker,
+          newTransactionMutation() {
+            assertDefined(graph.getNode('a')).invalidate();
+          },
+          preemptedTransactionIsCanceled: true,
+        });
+        // Ensure that after third transaction, b and c are updated
+        tracker.expectObservationBatches([
+          // Third transaction
+          [
+            ['b', { status: NodeStatus.Resolved, value: 4 }],
+            ['c', { status: NodeStatus.Resolved, value: 11 }],
+          ],
+        ]);
+      });
+
+      it('notifies observer after canceled by disconnected node being added', async () => {
+        const graph = TestGraphs.makeSmallChain();
+        const tracker = new GraphTracker(graph);
+        const newObserver = jest.fn();
+
+        await preemptCalculationWithNewTransaction({
+          graph,
+          tracker,
+          preemptedTransactionExtraMutation() {
+            assertDefined(graph.getNode('c')).addObserver(newObserver);
+          },
+          newTransactionMutation() {
+            // Add a disconnected node
+            graph.addNode('e', [], () => 0);
+            tracker.observe(['e']);
+            tracker.spyOnCalculates();
+          },
+          isNodeBChanged: false,
+          preemptedTransactionIsCanceled: true,
+        });
+
+        // Ensure that after third transaction, b and c are updated
+        expect(newObserver.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+      });
+
+      it('notifies observer after preempted by empty transaction', async () => {
+        const graph = TestGraphs.makeSmallChain();
+        const tracker = new GraphTracker(graph);
+        const newObserver = jest.fn();
+
+        await preemptCalculationWithNewTransaction({
+          graph,
+          tracker,
+          preemptedTransactionExtraMutation() {
+            assertDefined(graph.getNode('c')).addObserver(newObserver);
+          },
+          newTransactionMutation() {},
+          isNodeBChanged: false,
+          preemptedTransactionIsCanceled: false,
+        });
+
+        // Ensure that after third transaction, b and c are updated
+        expect(newObserver.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+      });
+
+      it('notifies observer after upstream node invalidated', async () => {
+        const graph = TestGraphs.makeSmallChain();
+        const tracker = new GraphTracker(graph);
+        const newObserver = jest.fn();
+
+        await preemptCalculationWithNewTransaction({
+          graph,
+          tracker,
+          preemptedTransactionExtraMutation() {
+            assertDefined(graph.getNode('c')).addObserver(newObserver);
+          },
+          newTransactionMutation() {
+            assertDefined(graph.getNode('a')).invalidate();
+          },
+          isNodeBChanged: false,
+          preemptedTransactionIsCanceled: true,
+        });
+
+        // Ensure that after third transaction, b and c are updated
+        expect(newObserver.mock.calls).toEqual([[{ status: NodeStatus.Resolved, value: 15 }]]);
+      });
     });
   });
 });

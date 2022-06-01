@@ -112,16 +112,24 @@ export type MissingDependencyErrorNodeState = {
 };
 
 /**
- * The current evaluation state of a node
+ * The states of a node which may cause an observer to be notified
  * @public
  */
-export type NodeState<TResult> =
-  | UnevaluatedNodeState
-  | PendingNodeState
-  | RunningNodeState
+export type EvaluatedNodeState<TResult> =
   | DeletedNodeState
   | MissingDependencyErrorNodeState
   | CircularDependencyNodeState
   | ResolvedNodeState<TResult>
   | ErrorNodeState
   | DependencyErrorNodeState;
+
+/**
+ * The current evaluation state of a node, including states of nodes
+ * which are not fully evaluated.
+ * @internal
+ */
+export type NodeState<TResult> =
+  | UnevaluatedNodeState
+  | PendingNodeState
+  | RunningNodeState
+  | EvaluatedNodeState<TResult>;

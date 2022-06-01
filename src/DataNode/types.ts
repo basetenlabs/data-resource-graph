@@ -1,5 +1,5 @@
 import DataNode from './DataNode';
-import { NodeState } from './NodeState';
+import { EvaluatedNodeState } from './NodeState';
 
 /**
  * An observer is a function which when registered on a node gets called every time the node is updated.
@@ -7,7 +7,7 @@ import { NodeState } from './NodeState';
  * be registered once per node.
  * @public
  */
-export type Observer<TResult> = (state: NodeState<TResult>) => void;
+export type Observer<TResult> = (state: EvaluatedNodeState<TResult>) => void;
 
 /**
  * @internal
