@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: chainguard-actions/actions-checkout@cb8b4f71d4f23febbe3347f6860f67c154995cad # v2.8.0
       - uses: actions/setup-node@v2
         with:
           node-version: '12'
