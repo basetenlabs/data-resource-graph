@@ -11,10 +11,10 @@ jobs:
         nodejs: [16, 18]
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: chainguard-actions/actions-checkout@cb8b4f71d4f23febbe3347f6860f67c154995cad # v2.8.0
 
       # https://github.com/actions/setup-node
-      - uses: actions/setup-node@v2-beta
+      - uses: chainguard-actions/actions-setup-node@0fc7fd914070e07cca22606e4cab3cfeaf43711d # v7.1.0
         with:
           node-version: ${{ matrix.nodejs }}
 
